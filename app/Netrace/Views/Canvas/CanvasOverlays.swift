@@ -59,7 +59,12 @@ struct CanvasOverlays: View {
     }
 
     private var toolHint: String? {
-        switch workspace.tool {
+        if workspace.isPickingPDU {
+            return workspace.pduSource == nil
+                ? "Add Simple PDU: click the device to ping from. Esc to cancel."
+                : "Now click the device to ping. Esc to cancel."
+        }
+        return switch workspace.tool {
         case .cable: "\(workspace.cableKind.title) cable: drag from one device to another, or click both. Esc to finish."
         case .hand: "Drag to pan. Pinch to zoom."
         default: nil
@@ -162,9 +167,10 @@ private struct Minimap: View {
 private struct SimulationTimeline: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
+    @EnvironmentObject private var simulation: SimulationController
 
     var body: some View {
-        let events = PreviewData.events(for: document.state).filter { workspace.visibleProtocols.contains($0.proto) }
+        let events = simulation.trace.filter { $0.netProtocol.map(workspace.visibleProtocols.contains) ?? true }
         let processed = events.filter { $0.time <= workspace.simulationTime }.count
         FloatingPanel {
             HStack(spacing: Theme.Spacing.xs) {
@@ -173,6 +179,7 @@ private struct SimulationTimeline: View {
                     workspace.simulationTime = 0
                 }
                 IconButton(glyph: .system("backward.frame.fill"), help: "Step Back (⌘[)", size: 13) {
+                    workspace.isPlaying = false
                     workspace.simulationTime = events.last { $0.time < workspace.simulationTime - 0.000_001 }.map { $0.time } ?? 0
                 }
                 Button {
@@ -187,7 +194,8 @@ private struct SimulationTimeline: View {
                 .buttonStyle(.plain)
                 .help(workspace.isPlaying ? "Pause" : "Play")
                 IconButton(glyph: .system("forward.frame.fill"), help: "Step Forward (⌘])", size: 13) {
-                    if let next = events.first(where: { $0.time > workspace.simulationTime }) {
+                    workspace.isPlaying = false
+                    if let next = events.first(where: { $0.time > workspace.simulationTime + 0.000_001 }) {
                         workspace.simulationTime = next.time
                     }
                 }

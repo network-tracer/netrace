@@ -18,6 +18,14 @@ extension DeviceKind {
         }
     }
 
+    /// End devices with a wired NIC: they take an IP configuration and can ping.
+    var isHost: Bool {
+        switch self {
+        case .pc, .laptop, .server, .printer, .ipPhone: true
+        default: false
+        }
+    }
+
     var displayName: String {
         switch self {
         case .router: "Router"

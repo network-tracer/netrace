@@ -5,10 +5,13 @@ import SwiftUI
 struct InspectorPanel: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
+    @EnvironmentObject private var simulation: SimulationController
 
     var body: some View {
         Group {
-            if workspace.selection.count == 1, let id = workspace.selection.first, let device = document.device(id) {
+            if let id = workspace.selectedEvent, let event = simulation.event(id) {
+                PacketInspector(event: event, document: document, workspace: workspace)
+            } else if workspace.selection.count == 1, let id = workspace.selection.first, let device = document.device(id) {
                 DeviceInspector(device: device, document: document, workspace: workspace)
             } else if let id = workspace.selectedAnnotation, let annotation = document.annotation(id) {
                 AnnotationInspector(annotation: annotation, document: document, workspace: workspace)
@@ -95,6 +98,7 @@ private struct DeviceInspector: View {
     let device: DeviceInfo
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
+    @EnvironmentObject private var simulation: SimulationController
 
     var body: some View {
         let power = workspace.powerState(device.id)
@@ -152,11 +156,18 @@ private struct DeviceInspector: View {
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.Palette.textTertiary)
         }
+        if device.kind.isHost {
+            HostIPEditor(device: device, document: document, workspace: workspace)
+        }
         InspectorSection("Status") {
             KeyValueRow("Power", power.title)
             KeyValueRow("Hostname", device.name, mono: true)
-            KeyValueRow("Address", device.kind.ports.isEmpty ? "Wi-Fi" : PreviewData.address(of: device, in: document.state), mono: true)
-            KeyValueRow("MAC", PreviewData.mac(of: device), mono: true)
+            if device.kind.isHost {
+                KeyValueRow("Address", device.ip.map { "\($0.address)/\($0.prefixLen)" } ?? "Not configured", mono: true)
+            }
+            if let port = device.kind.ports.first, let mac = simulation.macAddress(of: device.id, port: port) {
+                KeyValueRow("MAC", mac, mono: true)
+            }
         }
         InspectorSection("Canvas") {
             KeyValueRow("Position", "\(Int(device.x)), \(Int(device.y))", mono: true)
@@ -167,7 +178,7 @@ private struct DeviceInspector: View {
     @ViewBuilder
     private var interfaces: some View {
         let links = document.links(attachedTo: device.id)
-        InspectorSection("Interfaces", trailing: { PreviewBadge(milestone: "M3") }) {
+        InspectorSection("Interfaces", trailing: { if !device.kind.isHost { PreviewBadge(milestone: "M3") } }) {
             if device.kind.ports.isEmpty {
                 Text("Wireless only. Wi-Fi association arrives after v1.")
                     .font(Theme.Font.caption)
@@ -184,7 +195,7 @@ private struct DeviceInspector: View {
                             Text(port.abbreviatedInterface)
                                 .font(Theme.Font.mono)
                                 .foregroundStyle(Theme.Palette.textPrimary)
-                            Text(link != nil ? "up · unassigned" : "administratively down")
+                            Text(interfaceStatus(port: port, connected: link != nil))
                                 .font(Theme.Font.caption)
                                 .foregroundStyle(Theme.Palette.textTertiary)
                         }
@@ -205,6 +216,15 @@ private struct DeviceInspector: View {
             }
             .background(Theme.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
         }
+    }
+
+    /// Status line for a port; end devices show their real address.
+    private func interfaceStatus(port: String, connected: Bool) -> String {
+        if device.kind.isHost, port == device.kind.ports.first {
+            let address = device.ip.map { "\($0.address)/\($0.prefixLen)" } ?? "no IP address"
+            return connected ? "up · \(address)" : "no cable · \(address)"
+        }
+        return connected ? "up" : "not connected"
     }
 
     @ViewBuilder
@@ -282,6 +302,247 @@ private struct PowerPill: View {
         .padding(.horizontal, Theme.Spacing.s)
         .padding(.vertical, 3)
         .background(Capsule().fill(Theme.Palette.hover))
+    }
+}
+
+/// IP configuration form for end devices, like Packet Tracer's Desktop →
+/// IP Configuration. Applies on Return or the Apply button; validated by the core.
+private struct HostIPEditor: View {
+    let device: DeviceInfo
+    @ObservedObject var document: ProjectDocument
+    @ObservedObject var workspace: WorkspaceModel
+    @Environment(\.undoManager) private var undoManager
+    @State private var address = ""
+    @State private var mask = ""
+    @State private var gateway = ""
+
+    var body: some View {
+        InspectorSection("IP Configuration") {
+            field("IPv4 address", text: $address, prompt: "192.168.1.10")
+            field("Subnet mask", text: $mask, prompt: "255.255.255.0")
+            field("Default gateway", text: $gateway, prompt: "Optional")
+            HStack {
+                // No default-button shortcut: the inspector is always on screen and
+                // would steal Return from the console and canvas. Fields submit on Return.
+                Button("Apply", action: apply)
+                    .disabled(!isDirty)
+                if device.ip != nil {
+                    Button("Clear") {
+                        if case .failure(let error) = document.setHostIP(device.id, to: nil, undoManager: undoManager) {
+                            workspace.flash(error.message)
+                        }
+                    }
+                }
+            }
+            .controlSize(.small)
+        }
+        .onAppear(perform: load)
+        .onChange(of: device.ip) { _, _ in load() }
+        .onChange(of: device.id) { _, _ in load() }
+    }
+
+    private func field(_ label: String, text: Binding<String>, prompt: String) -> some View {
+        HStack {
+            Text(label)
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.Palette.textSecondary)
+                .frame(width: 104, alignment: .leading)
+            TextField(label, text: text, prompt: Text(prompt))
+                .textFieldStyle(.roundedBorder)
+                .font(Theme.Font.mono)
+                .labelsHidden()
+                .onSubmit(apply)
+        }
+    }
+
+    private var isDirty: Bool {
+        address != (device.ip?.address ?? "") || mask != (device.ip?.mask ?? "")
+            || gateway != (device.ip?.gateway ?? "")
+    }
+
+    private func load() {
+        address = device.ip?.address ?? ""
+        mask = device.ip?.mask ?? (address.isEmpty ? "" : "255.255.255.0")
+        gateway = device.ip?.gateway ?? ""
+    }
+
+    private func apply() {
+        guard isDirty else { return }
+        if address.trimmingCharacters(in: .whitespaces).isEmpty {
+            _ = document.setHostIP(device.id, to: nil, undoManager: undoManager)
+            return
+        }
+        do {
+            let ip = try parseHostIp(address: address, mask: mask.isEmpty ? "255.255.255.0" : mask, gateway: gateway)
+            if case .failure(let error) = document.setHostIP(device.id, to: ip, undoManager: undoManager) {
+                workspace.flash(error.message)
+            }
+        } catch let error as CoreError {
+            workspace.flash(error.message)
+        } catch {
+            workspace.flash(error.localizedDescription)
+        }
+    }
+}
+
+// MARK: - Packet
+
+/// One simulation step explained: a plain sentence first, then what each
+/// layer did at this device, with the raw fields one click away.
+private struct PacketInspector: View {
+    let event: TraceEventInfo
+    @ObservedObject var document: ProjectDocument
+    @ObservedObject var workspace: WorkspaceModel
+    @EnvironmentObject private var simulation: SimulationController
+
+    var body: some View {
+        let device = document.device(event.deviceId)
+        let siblings = simulation.trace.filter { $0.session != nil && $0.session == event.session }
+        let index = siblings.firstIndex { $0.id == event.id }
+        VStack(spacing: 0) {
+            InspectorHeader(title: device?.name ?? "Step",
+                            subtitle: "\(event.outcome.title) · \(String(format: "%.3f", event.time)) s") {
+                if let device {
+                    let size = DeviceSymbol.size(for: device.kind)
+                    DeviceSymbolView(kind: device.kind, scale: min(44 / size.width, 36 / size.height))
+                }
+            } trailing: {
+                if let proto = event.netProtocol { ProtocolTag(proto: proto) }
+            }
+            PanelDivider(axis: .horizontal)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                    Text(event.summary)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                    if !event.layers.isEmpty {
+                        InspectorSection("Layers at \(device?.name ?? "this device")") {
+                            VStack(spacing: Theme.Spacing.xs) {
+                                ForEach(event.layers.reversed(), id: \.number) { layer in
+                                    LayerRow(layer: layer)
+                                }
+                            }
+                        }
+                    }
+
+                    if let index {
+                        HStack {
+                            Button("Previous", systemImage: "chevron.left") {
+                                workspace.selectEvent(siblings[index - 1])
+                            }
+                            .disabled(index == 0)
+                            Spacer()
+                            Text("Step \(index + 1) of \(siblings.count)")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Palette.textSecondary)
+                            Spacer()
+                            Button("Next", systemImage: "chevron.right") {
+                                workspace.selectEvent(siblings[index + 1])
+                            }
+                            .disabled(index + 1 >= siblings.count)
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                .padding(Theme.Spacing.l)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+/// One layer's role at a hop: highlighted when used or changed, dimmed when
+/// the device never looked at it. Fields expand on demand; changed ones are marked.
+private struct LayerRow: View {
+    let layer: LayerNoteInfo
+    @State private var expanded = false
+
+    var body: some View {
+        let active = layer.role != .notUsed
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs + 2) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                Text("L\(layer.number)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(active ? (layer.role == .changed ? Theme.Palette.onAccent : Theme.Palette.surface)
+                                            : Theme.Palette.textTertiary)
+                    .frame(width: 24, height: 18)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(active ? roleColor : Theme.Palette.hover))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Text(layer.title)
+                            .font(Theme.Font.label)
+                            .foregroundStyle(active ? Theme.Palette.textPrimary : Theme.Palette.textTertiary)
+                        Text(roleLabel)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(active ? roleColor : Theme.Palette.textTertiary)
+                    }
+                    Text(layer.note)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(active ? Theme.Palette.textSecondary : Theme.Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if !layer.fields.isEmpty {
+                    Button {
+                        expanded.toggle()
+                    } label: {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.textTertiary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(expanded ? "Hide fields" : "Show fields")
+                    .accessibilityLabel(expanded ? "Hide \(layer.title) fields" : "Show \(layer.title) fields")
+                }
+            }
+            if expanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(layer.fields, id: \.name) { field in
+                        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                            Circle()
+                                .fill(field.changed ? Theme.Palette.accent : .clear)
+                                .frame(width: 5, height: 5)
+                                .help(field.changed ? "Set by this device" : "")
+                            Text(field.name)
+                                .foregroundStyle(Theme.Palette.textSecondary)
+                                .frame(width: 104, alignment: .leading)
+                            Text(field.value)
+                                .foregroundStyle(Theme.Palette.textPrimary)
+                                .textSelection(.enabled)
+                        }
+                        .font(Theme.Font.monoSmall)
+                    }
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .padding(Theme.Spacing.s)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)
+                .fill(active ? Theme.Palette.surfaceSunken : .clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous)
+                .strokeBorder(active ? .clear : Theme.Palette.border, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private var roleLabel: String {
+        switch layer.role {
+        case .changed: "Built here"
+        case .used: "Read"
+        case .notUsed: "Not read"
+        }
+    }
+
+    private var roleColor: Color {
+        layer.role == .changed ? Theme.Palette.accent : Theme.Palette.textSecondary
     }
 }
 

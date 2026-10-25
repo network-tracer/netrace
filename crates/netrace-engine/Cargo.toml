@@ -1,0 +1,11 @@
+[package]
+name = "netrace-engine"
+description = "netrace network simulation: devices, frames, protocols and explained traces"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+netrace-doc.workspace = true
+netrace-sim.workspace = true

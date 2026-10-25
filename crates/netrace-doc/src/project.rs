@@ -4,8 +4,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Annotation, AnnotationId, AnnotationKind, DeviceKind, DocError, FORMAT_VERSION, Medium, Rect,
-    RemovedAnnotation,
+    Annotation, AnnotationId, AnnotationKind, DeviceKind, DocError, FORMAT_VERSION, HostIp, Medium,
+    Rect, RemovedAnnotation,
 };
 
 const FORMAT_TAG: &str = "netrace";
@@ -54,6 +54,9 @@ pub struct Device {
     pub kind: DeviceKind,
     pub name: String,
     pub position: Point,
+    /// IPv4 settings for end devices; absent until configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip: Option<HostIp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -215,6 +218,7 @@ impl Project {
             kind,
             name: self.next_free_name(kind),
             position: Point::new(position.x, position.y),
+            ip: None,
         };
         self.devices.push(device);
         self.devices.last().expect("just pushed")
@@ -241,6 +245,19 @@ impl Project {
         }
         let device = self.device_mut(id)?;
         Ok(std::mem::replace(&mut device.name, name.to_string()))
+    }
+
+    /// Sets or clears an end device's IP settings; returns the previous ones.
+    pub fn set_host_ip(
+        &mut self,
+        id: DeviceId,
+        ip: Option<HostIp>,
+    ) -> Result<Option<HostIp>, DocError> {
+        let device = self.device_mut(id)?;
+        if !device.kind.is_host() {
+            return Err(DocError::NotAHost(device.name.clone()));
+        }
+        Ok(std::mem::replace(&mut device.ip, ip))
     }
 
     /// Removes a device and every link attached to it.
@@ -563,6 +580,25 @@ mod tests {
     }
 
     #[test]
+    fn host_ip_round_trips_and_is_limited_to_hosts() {
+        let (mut p, r1, _, pc1) = sample();
+        let ip = HostIp::new(
+            "192.168.1.10".parse().unwrap(),
+            24,
+            Some("192.168.1.1".parse().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(p.set_host_ip(pc1, Some(ip)).unwrap(), None);
+        assert_eq!(p.device(pc1).unwrap().ip, Some(ip));
+        assert_eq!(Project::from_json(&p.to_json()).unwrap(), p);
+        assert!(matches!(
+            p.set_host_ip(r1, Some(ip)),
+            Err(DocError::NotAHost(_))
+        ));
+        assert_eq!(p.set_host_ip(pc1, None).unwrap(), Some(ip));
+    }
+
+    #[test]
     fn ids_are_never_reused() {
         let mut p = Project::new();
         let a = p.add_device(DeviceKind::Pc, Point::default()).id;
@@ -703,6 +739,7 @@ mod tests {
         for bytes in [
             &include_bytes!("../../../examples/starter.netrace/project.json")[..],
             &include_bytes!("../../../examples/campus.netrace/project.json")[..],
+            &include_bytes!("../../../examples/office-lan.netrace/project.json")[..],
         ] {
             let p = Project::from_json(bytes).unwrap();
             assert!(!p.devices().is_empty());

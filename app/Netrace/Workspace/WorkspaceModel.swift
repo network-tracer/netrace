@@ -173,13 +173,27 @@ final class WorkspaceModel: ObservableObject {
     @Published var selection: Set<UInt64> = []
     @Published var selectedLink: UInt64?
     @Published var selectedAnnotation: UInt64?
+    /// A simulation step shown in the packet inspector.
+    @Published var selectedEvent: UInt64?
+    /// Add Simple PDU: picking the source, then the destination.
+    @Published var isPickingPDU = false
+    @Published var pduSource: UInt64?
     @Published var editingAnnotation: UInt64?
     @Published var renamingDevice: UInt64?
     /// Bumped by the Duplicate command; the canvas performs it (it owns the undo manager).
     @Published var duplicateRequests = 0
-    /// Centre of the visible canvas in world coordinates. Not published:
-    /// it changes on every scroll frame and only placement code reads it.
-    var viewportCenter = CGPoint(x: 400, y: 300)
+    /// World point shown at the top-left corner of the canvas. Together with
+    /// `zoom` this is the whole viewport; both change in one update when
+    /// zooming around a point, so the view never lands somewhere wrong.
+    @Published var viewOrigin: CGPoint = .zero
+    /// Size of the canvas on screen. Not published: set by the canvas on resize.
+    var viewportSize = CGSize(width: 800, height: 600)
+
+    /// Centre of the visible canvas in world coordinates.
+    var viewportCenter: CGPoint {
+        CGPoint(x: viewOrigin.x + viewportSize.width / (2 * zoom),
+                y: viewOrigin.y + viewportSize.height / (2 * zoom))
+    }
     @Published var pendingConnection: PendingConnection?
 
     // Preview state for features that arrive in later milestones.
@@ -190,8 +204,35 @@ final class WorkspaceModel: ObservableObject {
 
     static let zoomRange: ClosedRange<CGFloat> = 0.25...3
 
-    func setZoom(_ value: CGFloat) {
-        zoom = min(max(value, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+    /// Zooms keeping the world point under `point` (canvas coordinates) still;
+    /// without a point, the centre of the canvas stays still.
+    func setZoom(_ value: CGFloat, around point: CGPoint? = nil) {
+        let new = min(max(value, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        guard new != zoom else { return }
+        let p = point ?? CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
+        let world = CGPoint(x: viewOrigin.x + p.x / zoom, y: viewOrigin.y + p.y / zoom)
+        zoom = new
+        viewOrigin = CGPoint(x: world.x - p.x / new, y: world.y - p.y / new)
+    }
+
+    /// Moves the view by a distance in screen points; content follows the fingers.
+    func pan(by delta: CGSize) {
+        viewOrigin = CGPoint(x: viewOrigin.x - delta.width / zoom, y: viewOrigin.y - delta.height / zoom)
+    }
+
+    /// Centres the view on a world point.
+    func center(on point: CGPoint) {
+        viewOrigin = CGPoint(x: point.x - viewportSize.width / (2 * zoom),
+                             y: point.y - viewportSize.height / (2 * zoom))
+    }
+
+    /// Fits a world rectangle in the view, leaving `bottomInset` points free.
+    func fit(_ rect: CGRect, bottomInset: CGFloat = 0, maxZoom: CGFloat = 1) {
+        let height = max(100, viewportSize.height - bottomInset)
+        let fitted = min(viewportSize.width / rect.width, height / rect.height, maxZoom)
+        zoom = min(max(fitted, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        viewOrigin = CGPoint(x: rect.midX - viewportSize.width / (2 * zoom),
+                             y: rect.midY - height / (2 * zoom))
     }
 
     func zoomIn() { setZoom((zoom * 1.25 * 100).rounded() / 100) }
@@ -201,25 +242,53 @@ final class WorkspaceModel: ObservableObject {
         selection = ids
         selectedLink = nil
         selectedAnnotation = nil
+        selectedEvent = nil
     }
 
     func selectLink(_ id: UInt64?) {
         selectedLink = id
         selection = []
         selectedAnnotation = nil
+        selectedEvent = nil
     }
 
     func selectAnnotation(_ id: UInt64?) {
         selectedAnnotation = id
         selection = []
         selectedLink = nil
+        selectedEvent = nil
+    }
+
+    /// Shows a simulation step in the packet inspector and moves the clock to it.
+    func selectEvent(_ event: TraceEventInfo) {
+        selection = []
+        selectedLink = nil
+        selectedAnnotation = nil
+        selectedEvent = event.id
+        mode = .simulation
+        isPlaying = false
+        simulationTime = event.time
+        rightPane = .inspector
+        showsInspector = true
     }
 
     func clearSelection() {
         selection = []
         selectedLink = nil
         selectedAnnotation = nil
+        selectedEvent = nil
         editingAnnotation = nil
+    }
+
+    func startPickingPDU() {
+        isPickingPDU = true
+        pduSource = nil
+        flash("Add Simple PDU: click the device to ping from.")
+    }
+
+    func cancelPickingPDU() {
+        isPickingPDU = false
+        pduSource = nil
     }
 
     func powerState(_ id: UInt64) -> PowerState { power[id] ?? .running }

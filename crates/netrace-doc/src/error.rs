@@ -43,6 +43,12 @@ pub enum DocError {
     #[error("\"{0}\" is not a valid hostname: {1}")]
     InvalidName(String, &'static str),
 
+    #[error("invalid IP settings: {0}")]
+    InvalidIp(String),
+
+    #[error("{0} has no Ethernet port to configure")]
+    NotAHost(String),
+
     #[error("another device is already named \"{0}\"")]
     DuplicateName(String),
 

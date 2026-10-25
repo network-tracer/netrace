@@ -6,6 +6,7 @@ import SwiftUI
 struct ProjectWindow: View {
     @ObservedObject var document: ProjectDocument
     @StateObject private var workspace = WorkspaceModel()
+    @StateObject private var simulation = SimulationController()
 
     /// Canvas height kept visible when the bottom panel is maximised.
     private let minimumCanvasHeight: CGFloat = 140
@@ -49,11 +50,20 @@ struct ProjectWindow: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: workspace.bottomPanelMaximized)
+        .environmentObject(simulation)
+        .focusedSceneObject(simulation)
         .focusedSceneObject(workspace)
         .focusedSceneObject(document)
+        .onAppear { simulation.sync(with: document) }
         .onChange(of: document.state) { _, state in
             workspace.prune(devices: Set(state.devices.map(\.id)), links: Set(state.links.map(\.id)),
                             annotations: Set(state.annotations.map(\.id)))
+            if simulation.sync(with: document) {
+                workspace.isPlaying = false
+                workspace.simulationTime = 0
+                workspace.selectedEvent = nil
+                workspace.flash("The topology changed, so the simulation was reset.")
+            }
         }
     }
 }

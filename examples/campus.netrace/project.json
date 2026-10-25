@@ -1,15 +1,15 @@
 {
   "format": "netrace",
   "version": 1,
-  "next_id": 27,
+  "next_id": 29,
   "devices": [
     {
       "id": 1,
       "kind": "cloud",
       "name": "ISP1",
       "position": {
-        "x": 600.0,
-        "y": 96.0
+        "x": 864.0,
+        "y": 276.0
       }
     },
     {
@@ -17,8 +17,8 @@
       "kind": "firewall",
       "name": "FW1",
       "position": {
-        "x": 600.0,
-        "y": 216.0
+        "x": 864.0,
+        "y": 396.0
       }
     },
     {
@@ -26,8 +26,8 @@
       "kind": "router",
       "name": "R1",
       "position": {
-        "x": 600.0,
-        "y": 336.0
+        "x": 864.0,
+        "y": 516.0
       }
     },
     {
@@ -35,8 +35,8 @@
       "kind": "l3_switch",
       "name": "MLS1",
       "position": {
-        "x": 600.0,
-        "y": 456.0
+        "x": 864.0,
+        "y": 636.0
       }
     },
     {
@@ -44,8 +44,8 @@
       "kind": "l2_switch",
       "name": "SW1",
       "position": {
-        "x": 360.0,
-        "y": 600.0
+        "x": 624.0,
+        "y": 780.0
       }
     },
     {
@@ -53,8 +53,8 @@
       "kind": "l2_switch",
       "name": "SW2",
       "position": {
-        "x": 840.0,
-        "y": 600.0
+        "x": 1104.0,
+        "y": 780.0
       }
     },
     {
@@ -62,8 +62,8 @@
       "kind": "access_point",
       "name": "AP1",
       "position": {
-        "x": 960.0,
-        "y": 456.0
+        "x": 1224.0,
+        "y": 636.0
       }
     },
     {
@@ -71,8 +71,8 @@
       "kind": "pc",
       "name": "PC1",
       "position": {
-        "x": 216.0,
-        "y": 756.0
+        "x": 480.0,
+        "y": 936.0
       }
     },
     {
@@ -80,8 +80,8 @@
       "kind": "laptop",
       "name": "LAPTOP1",
       "position": {
-        "x": 360.0,
-        "y": 756.0
+        "x": 624.0,
+        "y": 936.0
       }
     },
     {
@@ -89,8 +89,8 @@
       "kind": "ip_phone",
       "name": "PHONE1",
       "position": {
-        "x": 504.0,
-        "y": 756.0
+        "x": 768.0,
+        "y": 936.0
       }
     },
     {
@@ -98,8 +98,8 @@
       "kind": "server",
       "name": "SRV1",
       "position": {
-        "x": 720.0,
-        "y": 756.0
+        "x": 984.0,
+        "y": 936.0
       }
     },
     {
@@ -107,8 +107,8 @@
       "kind": "printer",
       "name": "PRN1",
       "position": {
-        "x": 864.0,
-        "y": 756.0
+        "x": 1128.0,
+        "y": 936.0
       }
     },
     {
@@ -116,8 +116,8 @@
       "kind": "hub",
       "name": "HUB1",
       "position": {
-        "x": 1008.0,
-        "y": 756.0
+        "x": 1272.0,
+        "y": 936.0
       }
     },
     {
@@ -125,8 +125,8 @@
       "kind": "smartphone",
       "name": "MOBILE1",
       "position": {
-        "x": 1104.0,
-        "y": 456.0
+        "x": 1368.0,
+        "y": 636.0
       }
     }
   ],
@@ -274,6 +274,30 @@
         "port": "Port1"
       },
       "medium": "copper"
+    }
+  ],
+  "annotations": [
+    {
+      "id": 27,
+      "kind": "note",
+      "rect": {
+        "x": 420.0,
+        "y": 432.0,
+        "width": 180.0,
+        "height": 72.0
+      },
+      "text": "ygoufo86gjhguyg"
+    },
+    {
+      "id": 28,
+      "kind": "area",
+      "rect": {
+        "x": 408.0,
+        "y": 732.0,
+        "width": 418.3480067412155,
+        "height": 273.06611584355346
+      },
+      "text": ""
     }
   ]
 }

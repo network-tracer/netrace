@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct CanvasView: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
+    @EnvironmentObject private var simulation: SimulationController
     @Environment(\.undoManager) private var undoManager
 
     /// Live offset of devices being dragged; committed to the core on release
@@ -14,9 +15,9 @@ struct CanvasView: View {
     @State private var draggedIDs: Set<UInt64> = []
     @State private var cableDrag: CableDrag?
     @State private var pendingCableSource: UInt64?
-    @State private var scrollPosition = ScrollPosition()
-    @State private var visibleRect: CGRect = .zero
-    @State private var magnifyBase: CGFloat?
+    /// Trackpad pinch / scroll handling (kept out of view state so hovering
+    /// never re-renders the canvas).
+    @State private var input = CanvasInput()
     @State private var panStart: CGPoint?
     @State private var hasFittedOnOpen = false
     /// Live frames of annotations being moved or resized (committed on release).
@@ -35,37 +36,44 @@ struct CanvasView: View {
     private static let space = "world"
 
     var body: some View {
-        ZStack {
-            ScrollView([.horizontal, .vertical]) {
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                GridLayer(origin: workspace.viewOrigin, zoom: workspace.zoom, showsGrid: workspace.showsGrid)
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in backgroundTapped(at: toWorld(location)) }
+                    .gesture(backgroundDrag, including: backgroundDragEnabled ? .all : .subviews)
+                    .contextMenu { CanvasContextMenu(document: document, workspace: workspace, onZoomToFit: zoomToFit) }
+
                 world
-                    .frame(width: worldSize.width * workspace.zoom, height: worldSize.height * workspace.zoom,
-                           alignment: .topLeading)
+                    .offset(x: -workspace.viewOrigin.x * workspace.zoom, y: -workspace.viewOrigin.y * workspace.zoom)
+
+                CanvasOverlays(document: document, workspace: workspace, visibleRect: visibleRect,
+                               onZoomToFit: zoomToFit, onScrollTo: { workspace.center(on: $0) })
+                    .frame(width: geometry.size.width, height: geometry.size.height)
             }
-            .scrollPosition($scrollPosition)
-            .onScrollGeometryChange(for: CGRect.self, of: { $0.visibleRect }) { _, rect in
-                visibleRect = rect
-                workspace.viewportCenter = CGPoint(x: rect.midX / workspace.zoom, y: rect.midY / workspace.zoom)
-                // Frame the topology once the viewport size is known.
-                if !hasFittedOnOpen && rect.width > 0 {
-                    hasFittedOnOpen = true
-                    if !document.state.devices.isEmpty { zoomToFit() }
-                }
-            }
-            .background(Theme.Palette.canvas)
-            .simultaneousGesture(magnifyGesture)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .clipped()
+            .contentShape(Rectangle())
             .simultaneousGesture(panGesture, including: workspace.tool == .hand || spacePanning ? .all : .subviews)
             .dropDestination(for: String.self) { items, location in
                 guard let kind = items.first.flatMap(DeviceKind.init(dragIdentifier:)) else { return false }
-                let point = CGPoint(x: (location.x + visibleRect.minX) / workspace.zoom,
-                                    y: (location.y + visibleRect.minY) / workspace.zoom)
-                let device = document.addDevice(kind, at: point.snapped, undoManager: undoManager)
+                let device = document.addDevice(kind, at: toWorld(location).snapped, undoManager: undoManager)
                 workspace.selectDevices([device.id])
                 isFocused = true
                 return true
             }
-
-            CanvasOverlays(document: document, workspace: workspace, visibleRect: visibleRect,
-                           onZoomToFit: zoomToFit, onScrollTo: scroll(toWorld:))
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point): input.hover = point
+                case .ended: input.hover = nil
+                }
+            }
+            .onAppear {
+                input.install(workspace)
+                viewportResized(to: geometry.size)
+            }
+            .onChange(of: geometry.size) { _, size in viewportResized(to: size) }
+            .onDisappear { input.remove() }
         }
         .overlay(alignment: .top) {
             if workspace.mode == .simulation {
@@ -88,6 +96,10 @@ struct CanvasView: View {
             if workspace.renamingDevice != nil || workspace.editingAnnotation != nil {
                 workspace.renamingDevice = nil
                 workspace.editingAnnotation = nil
+                return .handled
+            }
+            if workspace.isPickingPDU {
+                workspace.cancelPickingPDU()
                 return .handled
             }
             if workspace.tool != .select || pendingCableSource != nil {
@@ -131,18 +143,6 @@ struct CanvasView: View {
     private var world: some View {
         let positions = displayedPositions
         return ZStack(alignment: .topLeading) {
-            Group {
-                if workspace.showsGrid {
-                    GridLayer()
-                } else {
-                    Theme.Palette.canvas
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture(coordinateSpace: .named(Self.space)) { location in backgroundTapped(at: location) }
-            .gesture(backgroundDrag, including: backgroundDragEnabled ? .all : .subviews)
-            .contextMenu { CanvasContextMenu(document: document, workspace: workspace, onZoomToFit: zoomToFit) }
-
             // Areas sit behind cables and devices.
             ForEach(document.state.annotations.filter { $0.kind == .area }) { area in
                 AreaView(annotation: area, rect: liveAnnotationRects[area.id] ?? area.rect,
@@ -191,7 +191,8 @@ struct CanvasView: View {
 
             ForEach(document.state.devices) { device in
                 NodeView(device: device, workspace: workspace,
-                         isSelected: workspace.selection.contains(device.id) || pendingCableSource == device.id,
+                         isSelected: workspace.selection.contains(device.id) || pendingCableSource == device.id
+                            || workspace.pduSource == device.id,
                          zoom: workspace.zoom,
                          onRename: { name in rename(device, to: name) })
                     // Before .position(), so the location is relative to the symbol's frame.
@@ -209,11 +210,11 @@ struct CanvasView: View {
 
             // Packets travel on top of devices so they stay visible at each hop.
             if workspace.mode == .simulation {
-                PacketsLayer(document: document, workspace: workspace, positions: positions)
+                PacketsLayer(workspace: workspace, positions: positions)
                     .allowsHitTesting(false)
             }
         }
-        .frame(width: worldSize.width, height: worldSize.height)
+        .frame(width: worldSize.width, height: worldSize.height, alignment: .topLeading)
         .coordinateSpace(.named(Self.space))
         .scaleEffect(workspace.zoom, anchor: .topLeading)
     }
@@ -247,9 +248,9 @@ struct CanvasView: View {
 
     /// Select tool: rubber-band selection. Area tool: draw the area.
     private var backgroundDrag: some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .named(Self.space))
+        DragGesture(minimumDistance: 3)
             .onChanged { value in
-                let rect = CGRect(corner: value.startLocation, to: value.location)
+                let rect = CGRect(corner: toWorld(value.startLocation), to: toWorld(value.location))
                 if workspace.tool == .rectangle { areaDraft = rect } else { marquee = rect }
             }
             .onEnded { _ in
@@ -406,6 +407,10 @@ struct CanvasView: View {
 
     private func deviceTapped(_ device: DeviceInfo) {
         isFocused = true
+        if workspace.isPickingPDU {
+            pduPicked(device)
+            return
+        }
         if workspace.tool == .cable {
             if let source = pendingCableSource, source != device.id {
                 connect(source, device.id)
@@ -458,6 +463,49 @@ struct CanvasView: View {
                 draggedIDs = []
                 dragOffset = .zero
             }
+    }
+
+    /// Add Simple PDU: the first click picks the source, the second fires a
+    /// ping at the destination's address.
+    private func pduPicked(_ device: DeviceInfo) {
+        guard let source = workspace.pduSource else {
+            guard device.kind.isHost else {
+                workspace.flash("\(device.name) can't send pings yet. Pick a PC, laptop, server, printer or phone.")
+                return
+            }
+            guard device.ip != nil else {
+                workspace.flash("\(device.name) has no IP address. Set one in its IP configuration first.")
+                return
+            }
+            workspace.pduSource = device.id
+            workspace.flash("Now click the device to ping.")
+            return
+        }
+        guard device.id != source else { return }
+        guard let address = device.ip?.address else {
+            workspace.flash("\(device.name) has no IP address, so there's nothing to ping.")
+            return
+        }
+        let simulated = workspace.mode == .simulation
+        workspace.cancelPickingPDU()
+        do {
+            let at = simulated ? workspace.simulationTime : simulation.endTime
+            guard let session = try simulation.ping(from: source, to: address, at: at) else { return }
+            let from = document.device(source)?.name ?? "?"
+            if simulated {
+                workspace.bottomTab = .events
+                workspace.showsBottomPanel = true
+                workspace.flash("Ping from \(from) to \(device.name) is ready. Press play or step forward to watch it.")
+            } else {
+                // Third line of the report is the first reply or failure.
+                let result = session.report.split(separator: "\n").dropFirst(1).first.map(String.init) ?? ""
+                workspace.flash("\(from) → \(device.name): \(result)")
+            }
+        } catch let error as CoreError {
+            workspace.flash(error.message)
+        } catch {
+            workspace.flash(error.localizedDescription)
+        }
     }
 
     /// Automatic cables connect straight away on the first free ports;
@@ -545,52 +593,56 @@ struct CanvasView: View {
         }
     }
 
-    private var magnifyGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                if magnifyBase == nil { magnifyBase = workspace.zoom }
-                workspace.setZoom((magnifyBase ?? 1) * value.magnification)
-            }
-            .onEnded { _ in magnifyBase = nil }
-    }
-
+    /// Drag with the Hand tool (or Space held) to pan.
     private var panGesture: some Gesture {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
-                if panStart == nil { panStart = visibleRect.origin }
+                if panStart == nil { panStart = workspace.viewOrigin }
                 guard let start = panStart else { return }
-                scrollPosition.scrollTo(point: CGPoint(x: max(0, start.x - value.translation.width),
-                                                       y: max(0, start.y - value.translation.height)))
+                workspace.viewOrigin = CGPoint(x: start.x - value.translation.width / workspace.zoom,
+                                               y: start.y - value.translation.height / workspace.zoom)
             }
             .onEnded { _ in panStart = nil }
     }
 
     // MARK: Viewport
 
+    /// Canvas (screen) point → world point.
+    private func toWorld(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: workspace.viewOrigin.x + point.x / workspace.zoom,
+                y: workspace.viewOrigin.y + point.y / workspace.zoom)
+    }
+
+    /// The visible area in zoomed content coordinates, as the overlays expect.
+    private var visibleRect: CGRect {
+        CGRect(x: workspace.viewOrigin.x * workspace.zoom, y: workspace.viewOrigin.y * workspace.zoom,
+               width: workspace.viewportSize.width, height: workspace.viewportSize.height)
+    }
+
+    private func viewportResized(to size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        workspace.viewportSize = size
+        // Frame the topology once the canvas has a size.
+        if !hasFittedOnOpen {
+            hasFittedOnOpen = true
+            if !document.state.devices.isEmpty { zoomToFit() }
+        }
+    }
+
     private func zoomToFit() {
-        guard !document.state.devices.isEmpty, visibleRect.width > 0 else {
+        guard !document.state.devices.isEmpty else {
             workspace.setZoom(1)
             return
         }
         let margin: CGFloat = 80
-        let xs = document.state.devices.map(\.x), ys = document.state.devices.map(\.y)
+        let notes = document.state.annotations.map(\.rect)
+        let xs = document.state.devices.map { CGFloat($0.x) } + notes.flatMap { [$0.minX, $0.maxX] }
+        let ys = document.state.devices.map { CGFloat($0.y) } + notes.flatMap { [$0.minY, $0.maxY] }
         let bounds = CGRect(x: xs.min()! - margin, y: ys.min()! - margin,
                             width: xs.max()! - xs.min()! + margin * 2, height: ys.max()! - ys.min()! + margin * 2)
         // Leave room for the floating minimap / timeline along the bottom edge.
         let bottomInset: CGFloat = workspace.showsMinimap || workspace.mode == .simulation ? 130 : 0
-        let zoom = min(visibleRect.width / bounds.width, (visibleRect.height - bottomInset) / bounds.height, 1)
-        workspace.setZoom(zoom)
-        // Scroll after the content has re-laid out at the new zoom.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            scrollPosition.scrollTo(point: CGPoint(x: max(0, bounds.minX * workspace.zoom),
-                                                   y: max(0, bounds.minY * workspace.zoom)))
-        }
-    }
-
-    /// Centres the viewport on a world point (minimap clicks).
-    private func scroll(toWorld point: CGPoint) {
-        scrollPosition.scrollTo(point: CGPoint(x: max(0, point.x * workspace.zoom - visibleRect.width / 2),
-                                               y: max(0, point.y * workspace.zoom - visibleRect.height / 2)))
+        workspace.fit(bounds, bottomInset: bottomInset)
     }
 
     /// Advances the preview simulation clock while playing.
@@ -598,10 +650,71 @@ struct CanvasView: View {
         while workspace.isPlaying && !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(16))
             workspace.simulationTime += 0.016 * 0.002 * workspace.simulationSpeed
-            if let last = PreviewData.events(for: document.state).last, workspace.simulationTime > last.time + 0.002 {
+            if workspace.simulationTime > simulation.endTime + simulation.hopLatency {
                 workspace.isPlaying = false
             }
         }
+    }
+}
+
+/// Reads trackpad pinch and two-finger scroll straight from AppKit while the
+/// pointer is over the canvas. Pinch zooms around the pointer; scrolling pans
+/// (with momentum); ⌘-scroll zooms. Each event updates zoom and origin in one
+/// step, so the view never jumps.
+@MainActor
+final class CanvasInput {
+    /// Pointer position over the canvas, or nil when it's elsewhere.
+    var hover: CGPoint?
+    private var monitor: Any?
+
+    func install(_ workspace: WorkspaceModel) {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self, weak workspace] event in
+            // Copy what's needed out of the event before hopping onto the main actor.
+            let input = Event(event)
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let workspace else { return false }
+                return self.handle(input, in: workspace)
+            }
+            return handled ? nil : event
+        }
+    }
+
+    private struct Event: Sendable {
+        let isMagnify: Bool
+        let magnification: CGFloat
+        let deltaX: CGFloat
+        let deltaY: CGFloat
+        let isPrecise: Bool
+        let command: Bool
+
+        init(_ event: NSEvent) {
+            isMagnify = event.type == .magnify
+            magnification = isMagnify ? event.magnification : 0
+            deltaX = isMagnify ? 0 : event.scrollingDeltaX
+            deltaY = isMagnify ? 0 : event.scrollingDeltaY
+            isPrecise = isMagnify ? true : event.hasPreciseScrollingDeltas
+            command = event.modifierFlags.contains(.command)
+        }
+    }
+
+    private func handle(_ event: Event, in workspace: WorkspaceModel) -> Bool {
+        guard let point = hover, !workspace.showsCommandPalette else { return false }
+        if event.isMagnify {
+            workspace.setZoom(workspace.zoom * (1 + event.magnification), around: point)
+        } else if event.command {
+            workspace.setZoom(workspace.zoom * exp(event.deltaY * 0.01), around: point)
+        } else {
+            // Mouse wheels report lines, trackpads report points.
+            let scale: CGFloat = event.isPrecise ? 1 : 10
+            workspace.pan(by: CGSize(width: event.deltaX * scale, height: event.deltaY * scale))
+        }
+        return true
+    }
+
+    func remove() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 }
 

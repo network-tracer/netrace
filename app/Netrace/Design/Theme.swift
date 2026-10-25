@@ -21,8 +21,9 @@ enum Theme {
         /// ≥ 4.8:1 on every surface in both modes (UX-ANALYSIS.md).
         static let textTertiary = Color(light: 0x6B6B6B, dark: 0x8F8F8F)
 
-        static let symbolFill = Color(light: 0xFFFFFF, dark: 0x262626)
-        static let symbolStroke = Color(light: 0x262626, dark: 0xE0E0E0)
+        /// Device silhouettes are solid ink with detail knocked out in the canvas colour.
+        static let symbolInk = Color(light: 0x2B2B2B, dark: 0xD9D9D9)
+        static let symbolKnockout = Color(light: 0xF5F5F5, dark: 0x161616)
         /// ≥ 3:1 against the canvas, as a meaningful graphic.
         static let link = Color(light: 0x7A7A7A, dark: 0x7A7A7A)
 

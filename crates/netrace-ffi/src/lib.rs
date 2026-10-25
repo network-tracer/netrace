@@ -10,6 +10,9 @@ use netrace_doc as doc;
 
 uniffi::setup_scaffolding!();
 
+mod simulation;
+pub use simulation::*;
+
 /// Version of the Rust core, shown in the app's About panel and status bar.
 #[uniffi::export]
 pub fn core_version() -> String {
@@ -74,6 +77,90 @@ pub struct DeviceInfo {
     pub name: String,
     pub x: f64,
     pub y: f64,
+    /// IPv4 settings (end devices only).
+    pub ip: Option<HostIpInfo>,
+}
+
+/// An end device's IPv4 settings. `mask` is derived from `prefix_len` and
+/// ignored on input.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct HostIpInfo {
+    pub address: String,
+    pub prefix_len: u8,
+    pub mask: String,
+    pub gateway: Option<String>,
+}
+
+impl From<doc::HostIp> for HostIpInfo {
+    fn from(ip: doc::HostIp) -> Self {
+        HostIpInfo {
+            address: ip.address.to_string(),
+            prefix_len: ip.prefix_len,
+            mask: ip.mask().to_string(),
+            gateway: ip.gateway.map(|g| g.to_string()),
+        }
+    }
+}
+
+impl TryFrom<&HostIpInfo> for doc::HostIp {
+    type Error = CoreError;
+
+    fn try_from(info: &HostIpInfo) -> Result<Self, CoreError> {
+        let address = parse_ipv4(&info.address, "IP address")?;
+        let gateway = info
+            .gateway
+            .as_deref()
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+            .map(|g| parse_ipv4(g, "default gateway"))
+            .transpose()?;
+        doc::HostIp::new(address, info.prefix_len, gateway).map_err(invalid_operation)
+    }
+}
+
+fn parse_ipv4(text: &str, what: &str) -> Result<std::net::Ipv4Addr, CoreError> {
+    text.trim()
+        .parse()
+        .map_err(|_| CoreError::InvalidOperation {
+            message: format!(
+                "\"{}\" is not a valid {what}. Use four numbers 0–255, like 192.168.1.10.",
+                text.trim()
+            ),
+        })
+}
+
+/// Validates IP settings typed into a form. `mask` may be dotted
+/// (255.255.255.0) or a prefix (/24 or 24); an empty gateway means none.
+#[uniffi::export]
+pub fn parse_host_ip(
+    address: String,
+    mask: String,
+    gateway: String,
+) -> Result<HostIpInfo, CoreError> {
+    let mask = mask.trim();
+    let prefix_len = if let Some(p) = mask
+        .strip_prefix('/')
+        .or(mask.parse::<u8>().ok().map(|_| mask))
+    {
+        p.parse::<u8>().map_err(|_| CoreError::InvalidOperation {
+            message: format!("\"{mask}\" is not a valid prefix length."),
+        })?
+    } else {
+        let dotted = parse_ipv4(mask, "subnet mask")?;
+        doc::prefix_from_mask(dotted).ok_or_else(|| CoreError::InvalidOperation {
+            message: format!(
+                "{mask} is not a valid subnet mask: the 1s must all come first, like 255.255.255.0."
+            ),
+        })?
+    };
+    let draft = HostIpInfo {
+        address,
+        prefix_len,
+        mask: String::new(),
+        gateway: Some(gateway),
+    };
+    let ip = doc::HostIp::try_from(&draft)?;
+    Ok(ip.into())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -179,6 +266,20 @@ impl Project {
         self.lock()
             .move_device(doc::DeviceId(id), doc::Point::new(x, y))
             .map_err(invalid_operation)
+    }
+
+    /// Sets or clears an end device's IP settings; returns the previous ones (for undo).
+    pub fn set_host_ip(
+        &self,
+        id: u64,
+        ip: Option<HostIpInfo>,
+    ) -> Result<Option<HostIpInfo>, CoreError> {
+        let ip = ip.as_ref().map(doc::HostIp::try_from).transpose()?;
+        let previous = self
+            .lock()
+            .set_host_ip(doc::DeviceId(id), ip)
+            .map_err(invalid_operation)?;
+        Ok(previous.map(HostIpInfo::from))
     }
 
     /// Renames a device; returns the previous name (for undo).
@@ -301,7 +402,7 @@ impl Project {
 }
 
 impl Project {
-    fn lock(&self) -> MutexGuard<'_, doc::Project> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, doc::Project> {
         // A panic mid-command can't leave the model half-written (every
         // mutation validates first), so a poisoned lock is safe to reuse.
         self.inner
@@ -408,6 +509,7 @@ impl From<&doc::Device> for DeviceInfo {
             name: d.name.clone(),
             x: d.position.x,
             y: d.position.y,
+            ip: d.ip.map(HostIpInfo::from),
         }
     }
 }
@@ -419,6 +521,7 @@ impl From<DeviceInfo> for doc::Device {
             kind: d.kind.into(),
             name: d.name,
             position: doc::Point::new(d.x, d.y),
+            ip: d.ip.as_ref().and_then(|ip| doc::HostIp::try_from(ip).ok()),
         }
     }
 }

@@ -301,10 +301,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "netrace-engine"
+version = "0.1.0"
+dependencies = [
+ "netrace-doc",
+ "netrace-sim",
+]
+
+[[package]]
 name = "netrace-ffi"
 version = "0.1.0"
 dependencies = [
  "netrace-doc",
+ "netrace-engine",
+ "netrace-sim",
  "thiserror",
  "uniffi",
 ]

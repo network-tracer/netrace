@@ -7,11 +7,13 @@
 mod annotation;
 mod device;
 mod error;
+mod ip;
 mod project;
 
 pub use annotation::{Annotation, AnnotationId, AnnotationKind, Rect, RemovedAnnotation};
 pub use device::{DeviceKind, Medium};
 pub use error::DocError;
+pub use ip::{HostIp, prefix_from_mask};
 pub use project::{Device, DeviceId, Endpoint, Link, LinkId, Point, Project, RemovedDevice};
 
 /// File inside the `.netrace` package that holds the project JSON.

@@ -4,6 +4,7 @@ import SwiftUI
 struct WorkspaceCommands: Commands {
     @FocusedObject private var workspace: WorkspaceModel?
     @FocusedObject private var document: ProjectDocument?
+    @FocusedObject private var simulation: SimulationController?
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
@@ -64,10 +65,7 @@ struct WorkspaceCommands: Commands {
                 workspace?.simulationTime = 0
             }
             Divider()
-            Button("Add Simple PDU") {
-                workspace?.mode = .simulation
-                workspace?.flash("Click a source device, then a destination. (Arrives in M2.)")
-            }
+            Button("Add Simple PDU") { workspace?.startPickingPDU() }
             .keyboardShortcut("p", modifiers: [.command, .shift])
         }
 
@@ -94,11 +92,13 @@ struct WorkspaceCommands: Commands {
     }
 
     private func step(forward: Bool) {
-        guard let workspace, let document else { return }
-        let events = PreviewData.events(for: document.state)
+        guard let workspace, let simulation else { return }
+        let events = simulation.trace
         workspace.mode = .simulation
         if forward {
-            if let next = events.first(where: { $0.time > workspace.simulationTime }) { workspace.simulationTime = next.time }
+            if let next = events.first(where: { $0.time > workspace.simulationTime + 0.000_001 }) {
+                workspace.simulationTime = next.time
+            }
         } else {
             workspace.simulationTime = events.last { $0.time < workspace.simulationTime - 0.000_001 }?.time ?? 0
         }

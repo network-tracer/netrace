@@ -177,6 +177,41 @@ extension ProjectDocument {
         }
     }
 
+    // MARK: IP settings and simulation
+
+    /// Sets or clears an end device's IP settings, with undo.
+    func setHostIP(_ id: UInt64, to ip: HostIpInfo?, undoManager: UndoManager?) -> Result<Void, CoreError> {
+        do {
+            let previous = try project.setHostIp(id: id, ip: ip)
+            guard previous != ip else { return .success(()) }
+            refresh()
+            let name = device(id)?.name ?? "Device"
+            registerUndo(undoManager, name: "IP Settings of \(name)") { doc, undo in
+                _ = doc.setHostIP(id, to: previous, undoManager: undo)
+            }
+            return .success(())
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
+    /// A fresh simulation of the current topology.
+    func makeSimulation() -> Simulation {
+        Simulation(project: project)
+    }
+
+    /// Everything the simulation depends on (not positions or names of
+    /// annotations), so moving a device doesn't reset a running simulation.
+    var topologyKey: String {
+        let devices = state.devices.map { d in
+            "\(d.id):\(d.kind):\(d.name):\(d.ip.map { "\($0.address)/\($0.prefixLen)/\($0.gateway ?? "")" } ?? "-")"
+        }
+        let links = state.links.map { "\($0.id):\($0.a.deviceId)/\($0.a.port)-\($0.b.deviceId)/\($0.b.port)" }
+        return (devices + links).joined(separator: "|")
+    }
+
     // MARK: Annotations
 
     func annotation(_ id: UInt64) -> AnnotationInfo? {

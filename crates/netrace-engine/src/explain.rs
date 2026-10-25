@@ -1,0 +1,125 @@
+//! Builders for the per-layer notes shown in the packet inspector.
+
+use crate::{
+    ArpOp, ArpPacket, Field, Frame, Icmp, IcmpKind, Ipv4Packet, Layer, LayerNote, LayerRole,
+    MacAddr, Payload,
+};
+
+fn field(name: &str, value: impl ToString, changed: bool) -> Field {
+    Field {
+        name: name.to_string(),
+        value: value.to_string(),
+        changed,
+    }
+}
+
+fn mac_label(mac: MacAddr) -> String {
+    if mac.is_broadcast() {
+        format!("{mac} (broadcast)")
+    } else if mac == MacAddr::ZERO {
+        format!("{mac} (unknown)")
+    } else {
+        mac.to_string()
+    }
+}
+
+pub(crate) fn physical(note: impl Into<String>) -> LayerNote {
+    LayerNote {
+        layer: Layer::Physical,
+        role: LayerRole::Used,
+        note: note.into(),
+        fields: Vec::new(),
+    }
+}
+
+pub(crate) fn not_used(layer: Layer, note: impl Into<String>) -> LayerNote {
+    LayerNote {
+        layer,
+        role: LayerRole::NotUsed,
+        note: note.into(),
+        fields: Vec::new(),
+    }
+}
+
+pub(crate) fn data_link(role: LayerRole, note: impl Into<String>, frame: &Frame) -> LayerNote {
+    let changed = role == LayerRole::Changed;
+    LayerNote {
+        layer: Layer::DataLink,
+        role,
+        note: note.into(),
+        fields: vec![
+            field("Destination MAC", mac_label(frame.dst), changed),
+            field("Source MAC", frame.src, changed),
+            field("Type", frame.ethertype(), changed),
+        ],
+    }
+}
+
+pub(crate) fn arp(role: LayerRole, note: impl Into<String>, arp: &ArpPacket) -> LayerNote {
+    let changed = role == LayerRole::Changed;
+    let op = match arp.op {
+        ArpOp::Request => "Request (1)",
+        ArpOp::Reply => "Reply (2)",
+    };
+    LayerNote {
+        layer: Layer::Network,
+        role,
+        note: note.into(),
+        fields: vec![
+            field("Protocol", "ARP", changed),
+            field("Operation", op, changed),
+            field("Sender MAC", arp.sender_mac, changed),
+            field("Sender IP", arp.sender_ip, changed),
+            field("Target MAC", mac_label(arp.target_mac), changed),
+            field("Target IP", arp.target_ip, changed),
+        ],
+    }
+}
+
+pub(crate) fn ipv4(role: LayerRole, note: impl Into<String>, ip: &Ipv4Packet) -> LayerNote {
+    let changed = role == LayerRole::Changed;
+    LayerNote {
+        layer: Layer::Network,
+        role,
+        note: note.into(),
+        fields: vec![
+            field("Protocol", "IPv4", changed),
+            field("Source IP", ip.src, changed),
+            field("Destination IP", ip.dst, changed),
+            field("TTL", ip.ttl, changed),
+            field("Carries", "ICMP (1)", changed),
+        ],
+    }
+}
+
+pub(crate) fn icmp(role: LayerRole, note: impl Into<String>, icmp: &Icmp) -> LayerNote {
+    let changed = role == LayerRole::Changed;
+    let kind = match icmp.kind {
+        IcmpKind::EchoRequest => "8 · Echo request",
+        IcmpKind::EchoReply => "0 · Echo reply",
+    };
+    LayerNote {
+        layer: Layer::Message,
+        role,
+        note: note.into(),
+        fields: vec![
+            field("Protocol", "ICMP", changed),
+            field("Type", kind, changed),
+            field("Code", 0, changed),
+            field("Identifier", format!("{:#06x}", icmp.id), changed),
+            field("Sequence", icmp.seq, changed),
+        ],
+    }
+}
+
+/// Upper layers a switch or hub does not read.
+pub(crate) fn upper_not_used(frame: &Frame, who: &str) -> Vec<LayerNote> {
+    let mut notes = vec![not_used(
+        Layer::Network,
+        format!("{who} doesn't read IP or ARP; it never looks past the Ethernet header."),
+    )];
+    if matches!(frame.payload, Payload::Ipv4(_)) {
+        notes.push(not_used(Layer::Message, "Carried along untouched."));
+    }
+    notes
+}

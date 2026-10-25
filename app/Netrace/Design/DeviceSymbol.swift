@@ -22,7 +22,7 @@ enum DeviceSymbol {
         case .laptop: CGSize(width: 60, height: 40)
         case .server: CGSize(width: 38, height: 50)
         case .printer: CGSize(width: 50, height: 42)
-        case .ipPhone: CGSize(width: 48, height: 40)
+        case .ipPhone: CGSize(width: 52, height: 42)
         case .smartphone: CGSize(width: 28, height: 48)
         }
     }
@@ -70,7 +70,17 @@ enum DeviceSymbol {
             let tray = Path(roundedRect: u.rect(0.16, 0.70, 0.68, 0.30), cornerRadius: r.height * 0.06, style: .continuous)
             return paper.union(body).union(tray)
         case .ipPhone:
-            return Path(roundedRect: r, cornerRadius: r.height * 0.16, style: .continuous)
+            // Desk phone: handset (with ear and mouth pieces) resting on the base.
+            let h = r.height
+            var handset = Path(roundedRect: u.rect(0.08, 0.02, 0.84, 0.20), cornerRadius: h * 0.10, style: .continuous)
+            for x in [0.15, 0.85] {
+                let c = u.point(x, 0.16)
+                handset = handset.union(Path(ellipseIn: CGRect(x: c.x - h * 0.15, y: c.y - h * 0.15,
+                                                               width: h * 0.30, height: h * 0.30)))
+            }
+            let neck = Path(u.rect(0.34, 0.18, 0.32, 0.22))
+            let base = Path(roundedRect: u.rect(0.02, 0.36, 0.96, 0.64), cornerRadius: h * 0.14, style: .continuous)
+            return handset.union(neck).union(base)
         case .smartphone:
             return Path(roundedRect: r, cornerRadius: r.width * 0.26, style: .continuous)
         }
@@ -126,9 +136,9 @@ enum DeviceSymbol {
         case .printer:
             p.move(to: u.point(0.16, 0.62)); p.addLine(to: u.point(0.84, 0.62))
         case .ipPhone:
-            // Handset on the left, display on the right.
-            p.addRoundedRect(in: u.rect(0.09, 0.14, 0.20, 0.72), cornerSize: CGSize(width: r.width * 0.09, height: r.width * 0.09), style: .continuous)
-            p.addRoundedRect(in: u.rect(0.38, 0.16, 0.52, 0.24), cornerSize: CGSize(width: 2, height: 2))
+            // Gap where the handset rests on the cradle, and the display.
+            p.move(to: u.point(0.30, 0.31)); p.addLine(to: u.point(0.70, 0.31))
+            p.addRoundedRect(in: u.rect(0.12, 0.50, 0.34, 0.30), cornerSize: CGSize(width: 2, height: 2))
         case .smartphone:
             p.move(to: u.point(0.38, 0.09)); p.addLine(to: u.point(0.62, 0.09))
             p.move(to: u.point(0.36, 0.91)); p.addLine(to: u.point(0.64, 0.91))
@@ -173,7 +183,7 @@ enum DeviceSymbol {
         case .ipPhone:
             for row in 0..<3 {
                 for col in 0..<3 {
-                    dot(0.46 + CGFloat(col) * 0.15, 0.55 + CGFloat(row) * 0.13, r.height * 0.035)
+                    dot(0.60 + CGFloat(col) * 0.12, 0.52 + CGFloat(row) * 0.14, r.height * 0.04)
                 }
             }
         default:
@@ -244,14 +254,14 @@ struct DeviceSymbolView: View {
     var body: some View {
         let size = DeviceSymbol.size(for: kind)
         let line = max(1, 1.5 * min(1, scale + 0.25))
+        // Solid style, like SF Symbols' filled variants: the silhouette is
+        // filled with the ink colour and interior detail is knocked out of it.
         ZStack {
-            DeviceOutlineShape(kind: kind).fill(Theme.Palette.symbolFill)
-            DeviceFaintShape(kind: kind).stroke(Theme.Palette.symbolStroke.opacity(0.35), lineWidth: line * 0.8)
+            DeviceOutlineShape(kind: kind).fill(Theme.Palette.symbolInk)
+            DeviceFaintShape(kind: kind).fill(Theme.Palette.symbolKnockout.opacity(0.22))
             DeviceDetailShape(kind: kind)
-                .stroke(Theme.Palette.symbolStroke, style: StrokeStyle(lineWidth: line, lineCap: .round, lineJoin: .round))
-            DeviceSolidsShape(kind: kind).fill(Theme.Palette.symbolStroke)
-            DeviceOutlineShape(kind: kind)
-                .stroke(Theme.Palette.symbolStroke, style: StrokeStyle(lineWidth: line, lineJoin: .round))
+                .stroke(Theme.Palette.symbolKnockout, style: StrokeStyle(lineWidth: line, lineCap: .round, lineJoin: .round))
+            DeviceSolidsShape(kind: kind).fill(Theme.Palette.symbolKnockout)
         }
         .frame(width: size.width * scale, height: size.height * scale)
         .opacity(isDimmed ? 0.4 : 1)

@@ -1,0 +1,219 @@
+{
+  "format": "netrace",
+  "version": 1,
+  "next_id": 21,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 480.0,
+        "y": 240.0
+      }
+    },
+    {
+      "id": 2,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 240.0,
+        "y": 420.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 372.0,
+        "y": 432.0
+      },
+      "ip": {
+        "address": "192.168.1.11",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 4,
+      "kind": "laptop",
+      "name": "LAPTOP1",
+      "position": {
+        "x": 528.0,
+        "y": 420.0
+      },
+      "ip": {
+        "address": "192.168.1.12",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 5,
+      "kind": "server",
+      "name": "SRV1",
+      "position": {
+        "x": 720.0,
+        "y": 240.0
+      },
+      "ip": {
+        "address": "192.168.1.20",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 6,
+      "kind": "hub",
+      "name": "HUB1",
+      "position": {
+        "x": 720.0,
+        "y": 420.0
+      }
+    },
+    {
+      "id": 7,
+      "kind": "pc",
+      "name": "PC3",
+      "position": {
+        "x": 648.0,
+        "y": 576.0
+      },
+      "ip": {
+        "address": "192.168.1.67",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 8,
+      "kind": "printer",
+      "name": "PRN1",
+      "position": {
+        "x": 792.0,
+        "y": 576.0
+      },
+      "ip": {
+        "address": "192.168.1.30",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 9,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 10,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 12,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 5,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 13,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/5"
+      },
+      "b": {
+        "device": 6,
+        "port": "Port1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 14,
+      "a": {
+        "device": 6,
+        "port": "Port2"
+      },
+      "b": {
+        "device": 7,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 15,
+      "a": {
+        "device": 6,
+        "port": "Port3"
+      },
+      "b": {
+        "device": 8,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 20,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/3"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "fiber"
+    }
+  ],
+  "annotations": [
+    {
+      "id": 16,
+      "kind": "note",
+      "rect": {
+        "x": 144.0,
+        "y": 108.0,
+        "width": 261.3857832028738,
+        "height": 102.32891206835347
+      },
+      "text": "Try it: switch to Simulation, click Add PDU, then PC1 and PC2, and step through. Then ping PC3 behind the hub and watch who sees the frames."
+    },
+    {
+      "id": 17,
+      "kind": "area",
+      "rect": {
+        "x": 144.0,
+        "y": 360.0,
+        "width": 435.0,
+        "height": 151.0
+      },
+      "text": "LAN Sales 01"
+    }
+  ]
+}

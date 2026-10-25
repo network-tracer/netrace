@@ -46,8 +46,7 @@ struct WindowToolbar: CustomizableToolbarContent {
         // Simulation
         ToolbarItem(id: "pdu", placement: .primaryAction) {
             Button {
-                workspace.mode = .simulation
-                workspace.flash("Click a source device, then a destination. (Arrives in M2.)")
+                if workspace.isPickingPDU { workspace.cancelPickingPDU() } else { workspace.startPickingPDU() }
             } label: {
                 Label("Add PDU", systemImage: "envelope.badge")
             }

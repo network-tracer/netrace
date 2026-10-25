@@ -28,6 +28,7 @@ code, assets, names or file formats.
 ┌───────────────┴──── netrace-ffi (UniFFI → XCFramework) ───────────┐
 ├───────────────────────────── Rust core ───────────────────────────┤
 │  netrace-sim      event scheduler, virtual clock, deterministic RNG│
+│  netrace-engine   devices, frames, ARP/ICMP, explained traces (M2) │
 │  netrace-proto    Ethernet, 802.1Q, STP, ARP, IPv4, ICMP, TCP/UDP, │
 │                   OSPF, DHCP, ACL, NAT, CDP/LLDP                    │
 │  netrace-devices  router, L2/L3 switch, PC, server                 │
@@ -51,6 +52,7 @@ code, assets, names or file formats.
   mapped to semantic roles. Blue is the accent; green / red / orange / yellow are kept for status
 - Type: SF Pro (interface), SF Mono (interface names, CLI). No bundled fonts
 - Icons: in-house SVG set, 24 pt grid, 1.5 pt round strokes, template-tinted (`Assets.xcassets/Icons`)
+- Device symbols: solid filled silhouettes in the style of SF Symbols' `.fill` variants, detail knocked out
 - App icon: `design/app-icon.svg`, rendered by `scripts/render-app-icon.sh`
 - View → Appearance: System / Light / Dark
 
@@ -64,6 +66,55 @@ From real CCNA classes using Packet Tracer and GNS3. Every milestone is checked 
 | **Configs have to be redone.** Work is lost between sessions or must be retyped on the next device. | Running and startup configs are saved inside the `.netrace` file; snapshots restore a known-good state; **Duplicate with variations**: copy a device's config to others and fill in only what differs (hostname, addresses) from a short form. | M3, M6 |
 | **Layer information is hard to understand.** Packet Tracer's OSI view lists fields at every layer with little explanation. | Packet inspector leads with one plain-language sentence per hop ("SW1 learned PC1's MAC on Fa0/1 and forwarded the frame out Fa0/2"), then a layer strip (L1–L4) where only the layers that *changed or mattered* at that hop are highlighted; raw fields are one click away, with changed fields marked. | M2 |
 | **Battery drain.** GNS3 runs real router images in virtual machines, so a MacBook dies in minutes. | No VMs: devices are lightweight simulations inside one process, driven by an event queue on a virtual clock. Idle means zero work. See *Energy* below. | All |
+| **GNS3 is hard to get running.** A separate local server (often broken on Windows), Cisco images to find and license, heavy RAM/CPU use, a steep learning curve before the first ping. | One app, nothing else to install: no server, no VM, no images. Open it and drag a router out. Everything a CCNA lab needs is built in, and the bundled labs teach the interface as they go. | All |
+| **Hard to see what a config actually does.** NAT, ACLs or VLANs are invisible on the diagram; you only find out by reading configs or running `show` commands. | *Configured features are visible* (below): the canvas marks where each feature applies, and the visualiser shows it acting on packets. | M4, M5 |
+| **Diagrams all look alike.** Every cable and device is the same grey, so a busy topology is hard to read. | Colours for devices, notes and areas, distinct cable styles per type, and shapes for annotation (below). | M2.5 |
+
+## Configured features are visible
+
+Each feature gets a quiet marker on the canvas when it is configured, and an obvious effect when
+it acts on a packet in Simulation mode. Markers can be switched off per feature (View → Overlays).
+
+| Feature | On the canvas | In the visualiser |
+|---|---|---|
+| NAT / PAT | Inside / outside badges on the interfaces; the NAT router gets a small translation glyph | The packet visibly changes address at the router: old address struck through, new one highlighted; the inspector shows the translation table row it used |
+| ACLs | Shield badge on the interface and direction (in / out) where an ACL is applied | Permitted packets pass the shield; denied ones stop at it with the matching ACL line |
+| VLANs | Access ports and cables tinted by VLAN (with a legend); trunks drawn striped | Frames carry a VLAN tag colour; tagging / untagging is shown at trunk ports |
+| STP | Blocked ports shown with an amber bar across the link end; the root bridge gets a crown badge | BPDUs animate from the root; topology change shown as ports change state |
+| DHCP | Server and relay badges; pools listed in the inspector | DORA exchange stepped through, with the lease appearing on the PC |
+| OSPF | Areas outlined (from the config) and neighbour adjacencies drawn as a thin overlay | Hellos and LSAs animate; DR / BDR marked |
+| Routing | Hover a router to see its routes highlighted as paths on the diagram | The route that matched is named in the hop explanation |
+
+## Canvas styling
+
+- **Shapes:** rectangle, rounded rectangle, ellipse, polygon with *n* sides (3–12), line and
+  arrow, each with a fill colour, border colour and style (solid, dashed, dotted) and opacity.
+- **How shapes interact:** shapes sit behind devices and cables; z-order (bring forward / send
+  back); snap to the grid and to other shapes' edges and centres; a device dropped inside a shape
+  belongs to it, so moving the shape moves its devices (like areas today), and nested shapes
+  nest; overlapping shapes blend, never hide devices; group / ungroup (⌘G); lock to stop
+  accidental moves.
+- **Colours:** a small fixed palette (system colours) for devices, shapes, notes and labels, so
+  diagrams stay readable in light and dark mode. Device symbols stay solid silhouettes, tinted.
+- **Cables:** each type has its own look so they can be told apart at a glance: copper solid,
+  fibre double line, console dotted, serial zig-zag, crossover dashed; optional per-cable colour
+  and label. Wireless associations drawn as faint dashed arcs.
+
+## After v1.0: enterprise track (CCNP)
+
+Packet Tracer stops at CCNA. GNS3 / CML go further but need real images, servers and lots of RAM.
+After v1.0, netrace can grow the same engine toward CCNP ENCOR / ENARSI topics, still as a
+simulation with no images:
+
+- IOS-XE style CLI depth: `show` output, `do`, `section` / `include` filters, configuration
+  archives and rollback
+- Multi-area OSPF, EIGRP, BGP basics, route redistribution and filtering (prefix lists, route maps)
+- HSRP / VRRP, EtherChannel (LACP / PAgP), MST
+- VRF-lite, GRE tunnels, IPsec basics, NAT64 later
+- QoS markings visible in the visualiser
+- Larger topologies (500+ devices) within the same energy budget
+
+This is a separate product phase: it is planned, not promised for v1.x.
 
 ## Energy
 
@@ -168,10 +219,11 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 |---|---|---|
 | M0 ✅ | Foundation | Cargo workspace with event scheduler and tests, UniFFI bindings built into an XCFramework by one script, Xcode app links it, `.netrace` document opens and saves |
 | M1 ✅ | Canvas | Place, cable (with port choice), rename, arrange and annotate devices: notes and areas saved in the document, marquee selection, copy/paste/duplicate keeping cables between copies, arrow-key nudging, semantic zoom, new devices placed in view, Space-drag panning; all undoable |
-| M2 | Layer 2 + ARP/ICMP | Two PCs on a switch ping each other; visualiser v1 shows the ARP + ICMP exchange with the plain-language packet inspector |
+| M2 ✅ | Layer 2 + ARP/ICMP | Two PCs on a switch ping each other; visualiser v1 shows the ARP + ICMP exchange with the plain-language packet inspector |
+| M2.5 | Canvas styling | Shapes (incl. *n*-sided polygons) with colours and interaction rules, device and note colours, distinct cable styles; smooth pinch / scroll zoom anchored at the pointer |
 | M3 | CLI + routing | IOS parser, router interfaces, static routes, traceroute, subinterfaces, SVIs; multi-line paste, config snippets, configs saved in the file, duplicate with variations |
-| M4 | Switching | VLANs, trunks, STP, CDP/LLDP, port security |
-| M5 | Services | DHCP, ACLs, NAT/PAT, OSPF |
+| M4 | Switching | VLANs, trunks, STP, CDP/LLDP, port security; VLAN tinting and STP markers on the canvas |
+| M5 | Services | DHCP, ACLs, NAT/PAT, OSPF, each with its canvas markers and visualiser effects |
 | M6 | Labs + polish | Lab engine, 20 labs, performance pass, beta |
 
 ## Quality targets

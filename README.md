@@ -19,7 +19,8 @@ make test    # Rust tests
 make lint    # rustfmt + clippy
 ```
 
-Open `examples/starter.netrace` for a small sample topology, or
+Open `examples/office-lan.netrace` to try the simulation (pings between
+configured PCs), `examples/starter.netrace` for a small topology, or
 `examples/campus.netrace` for one that uses every device kind.
 
 After changing anything in `crates/`, run `make core` before building in Xcode:
@@ -31,6 +32,7 @@ the app links the static library and Swift bindings that step produces.
 crates/
   netrace-sim/   deterministic event scheduler, virtual clock, seeded RNG
   netrace-doc/   project model + .netrace file format (JSON, validated on load)
+  netrace-engine/ network simulation: switches, hubs, ARP, ICMP, explained traces
   netrace-ffi/   UniFFI bridge: the only API the Swift app sees
 app/
   project.yml    XcodeGen spec (the .xcodeproj is generated, not committed)

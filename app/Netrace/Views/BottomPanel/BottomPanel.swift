@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Tabbed panel under the canvas: Console, Events, Capture, Lab.
+/// Tabbed panel under the canvas: Console, Events, Capture.
 struct BottomPanel: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
@@ -64,6 +64,7 @@ struct BottomPanel: View {
 private struct ConsoleTab: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
+    @EnvironmentObject private var simulation: SimulationController
     @State private var input = ""
     @State private var history: [UInt64: [String]] = [:]
     @FocusState private var inputFocused: Bool
@@ -73,7 +74,7 @@ private struct ConsoleTab: View {
         if sessions.isEmpty {
             VStack(spacing: Theme.Spacing.m) {
                 EmptyState(glyph: .system("terminal"), title: "No console sessions",
-                           message: "Right-click a device and choose Open Console, or pick one here.")
+                           message: "Double-click a device to open its console, or pick one here.")
                 Menu("Open Console") {
                     ForEach(document.state.devices) { device in
                         Button(device.name) { workspace.openConsole(for: device.id) }
@@ -85,6 +86,7 @@ private struct ConsoleTab: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             let active = sessions.first { $0.id == workspace.activeConsole } ?? sessions[0]
+            let isLive = active.kind.isHost
             VStack(spacing: 0) {
                 HStack(spacing: Theme.Spacing.xs) {
                     ForEach(sessions) { device in
@@ -107,7 +109,7 @@ private struct ConsoleTab: View {
                     .fixedSize()
                     .help("Open another console")
                     Spacer()
-                    PreviewBadge(milestone: "M3")
+                    if !isLive { PreviewBadge(milestone: "M3") }
                 }
                 .padding(.horizontal, Theme.Spacing.m)
                 .padding(.vertical, Theme.Spacing.xs + 2)
@@ -115,7 +117,8 @@ private struct ConsoleTab: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(PreviewData.transcript(for: active, in: document.state))
+                        Text(isLive ? hostBanner(for: active) : PreviewData.transcript(for: active, in: document.state))
+                            .foregroundStyle(isLive ? Theme.Palette.textSecondary : Theme.Palette.textPrimary)
                         ForEach(Array((history[active.id] ?? []).enumerated()), id: \.offset) { _, line in
                             Text(line)
                         }
@@ -130,10 +133,10 @@ private struct ConsoleTab: View {
                 .background(Theme.Palette.surfaceSunken)
 
                 HStack(spacing: Theme.Spacing.xs) {
-                    Text(PreviewData.prompt(for: active))
+                    Text(prompt(for: active))
                         .font(Theme.Font.mono)
                         .foregroundStyle(Theme.Palette.textSecondary)
-                    TextField("Type a command", text: $input)
+                    TextField(isLive ? "ping, ipconfig, arp -a, help" : "Type a command", text: $input)
                         .textFieldStyle(.plain)
                         .font(Theme.Font.mono)
                         .focused($inputFocused)
@@ -142,14 +145,7 @@ private struct ConsoleTab: View {
                         .onChange(of: workspace.focusConsoleInput) { _, _ in
                             DispatchQueue.main.async { inputFocused = true }
                         }
-                        .onSubmit {
-                            guard !input.isEmpty else { return }
-                            history[active.id, default: []] += [
-                                "\(PreviewData.prompt(for: active)) \(input)",
-                                "% The command line arrives with milestone M3.",
-                            ]
-                            input = ""
-                        }
+                        .onSubmit { run(input, on: active) }
                 }
                 .padding(.horizontal, Theme.Spacing.m)
                 .frame(height: 30)
@@ -157,6 +153,33 @@ private struct ConsoleTab: View {
                 .overlay(alignment: .top) { PanelDivider(axis: .horizontal) }
             }
         }
+    }
+
+    private func run(_ line: String, on device: DeviceInfo) {
+        let command = line.trimmingCharacters(in: .whitespaces)
+        input = ""
+        guard !command.isEmpty else { return }
+        var lines = history[device.id] ?? []
+        lines.append("\(prompt(for: device)) \(command)")
+        if command.lowercased() == "cls" || command.lowercased() == "clear" {
+            history[device.id] = []
+            return
+        }
+        if device.kind.isHost {
+            lines.append(simulation.hostCommand(command, on: device.id))
+        } else {
+            lines.append("% The IOS command line arrives with milestone M3.")
+        }
+        history[device.id] = lines
+    }
+
+    private func prompt(for device: DeviceInfo) -> String {
+        device.kind.isHost ? "C:\\>" : PreviewData.prompt(for: device)
+    }
+
+    private func hostBanner(for device: DeviceInfo) -> String {
+        let address = device.ip.map { "\($0.address)/\($0.prefixLen)" } ?? "no IP address yet"
+        return "\(device.name) command prompt (\(address)). Type help for commands.\n"
     }
 }
 
@@ -204,58 +227,77 @@ private struct SessionChip: View {
 private struct EventsTab: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
+    @EnvironmentObject private var simulation: SimulationController
 
     var body: some View {
-        let events = PreviewData.events(for: document.state).filter { workspace.visibleProtocols.contains($0.proto) }
-        let current = events.last { $0.time <= workspace.simulationTime }?.id
+        let events = simulation.trace.filter { $0.netProtocol.map(workspace.visibleProtocols.contains) ?? true }
+        let current = workspace.selectedEvent ?? events.last { $0.time <= workspace.simulationTime + 0.000_001 }?.id
         VStack(spacing: 0) {
             HStack(spacing: Theme.Spacing.m) {
-                Text(workspace.mode == .simulation ? "Simulation events" : "Switch to Simulation to step through events")
+                Text(headline(events: events))
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.Palette.textSecondary)
                 Spacer()
-                ForEach(NetProtocol.allCases.filter { p in events.contains { $0.proto == p } }) { proto in
+                ForEach(NetProtocol.allCases.filter { p in events.contains { $0.netProtocol == p } }) { proto in
                     ProtocolTag(proto: proto)
                 }
-                PreviewBadge(milestone: "M2")
+                Button("Add PDU", systemImage: "envelope.badge") { workspace.startPickingPDU() }
+                    .controlSize(.small)
             }
             .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.xs + 2)
+            if let warning = simulation.warnings.first {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.statusWarning)
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.bottom, Theme.Spacing.xs)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             PanelDivider(axis: .horizontal)
 
             if events.isEmpty {
-                EmptyState(glyph: .system("list.bullet.rectangle"), title: "No events",
-                           message: "Cable some devices together. Their ARP, ICMP and spanning-tree traffic shows up here.")
+                EmptyState(glyph: .custom(.pdu), title: "No traffic yet",
+                           message: "Give two PCs IP addresses, then use Add PDU (or type ping in a PC's console) to watch ARP and ICMP step by step.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(events, selection: Binding(
                     get: { current },
                     set: { id in
-                        if let event = events.first(where: { $0.id == id }) {
-                            workspace.mode = .simulation
-                            workspace.isPlaying = false
-                            workspace.simulationTime = event.time
-                        }
+                        if let event = events.first(where: { $0.id == id }) { workspace.selectEvent(event) }
                     }
                 )) {
                     TableColumn("Time (s)") { e in
-                        Text(String(format: "%.4f", e.time)).font(Theme.Font.mono)
-                            .foregroundStyle(e.time <= workspace.simulationTime ? Theme.Palette.textPrimary : Theme.Palette.textTertiary)
+                        Text(String(format: "%.3f", e.time)).font(Theme.Font.mono)
+                            .foregroundStyle(e.time <= workspace.simulationTime + 0.000_001 ? Theme.Palette.textPrimary : Theme.Palette.textTertiary)
                     }
-                    .width(min: 70, ideal: 80, max: 100)
-                    TableColumn("Last device") { e in Text(e.lastDevice) }
-                        .width(min: 70, ideal: 90, max: 140)
-                    TableColumn("At device") { e in Text(e.atDevice) }
-                        .width(min: 70, ideal: 90, max: 140)
-                    TableColumn("Type") { e in ProtocolTag(proto: e.proto) }
-                        .width(min: 60, ideal: 70, max: 90)
-                    TableColumn("Info") { e in
-                        Text(e.info).font(Theme.Font.mono).foregroundStyle(Theme.Palette.textSecondary)
+                    .width(min: 60, ideal: 70, max: 90)
+                    TableColumn("Last device") { e in Text(e.fromDeviceId.flatMap { document.device($0)?.name } ?? "–") }
+                        .width(min: 60, ideal: 80, max: 120)
+                    TableColumn("At device") { e in Text(document.device(e.deviceId)?.name ?? "?") }
+                        .width(min: 60, ideal: 80, max: 120)
+                    TableColumn("Type") { e in
+                        if let proto = e.netProtocol { ProtocolTag(proto: proto) } else { Text("–") }
+                    }
+                    .width(min: 50, ideal: 60, max: 80)
+                    TableColumn("What happened") { e in
+                        Text(e.summary)
+                            .foregroundStyle(e.isRejection ? Theme.Palette.textSecondary : Theme.Palette.textPrimary)
+                            .help(e.summary)
                     }
                 }
                 .font(Theme.Font.body)
             }
         }
+    }
+
+    private func headline(events: [TraceEventInfo]) -> String {
+        guard let last = simulation.sessions.last else {
+            return workspace.mode == .simulation ? "Simulation" : "Realtime"
+        }
+        let from = document.device(last.sourceId)?.name ?? "?"
+        let status = !last.finished ? "in progress" : (last.succeeded ? "succeeded" : "failed")
+        return "Last ping: \(from) → \(last.destination), \(status) · \(events.count) events"
     }
 }
 
@@ -264,17 +306,18 @@ private struct EventsTab: View {
 private struct CaptureTab: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
-    @State private var selectedPacket: Int? = 3
+    @EnvironmentObject private var simulation: SimulationController
+    @State private var selectedPacket: UInt64?
     @State private var filter = ""
 
     var body: some View {
         if let id = workspace.captureLink, let link = document.link(id) {
             let a = document.device(link.a.deviceId)?.name ?? "?"
             let b = document.device(link.b.deviceId)?.name ?? "?"
-            let packets = PreviewData.packets(on: link, in: document.state).filter {
-                filter.isEmpty || $0.proto.rawValue.localizedCaseInsensitiveContains(filter)
+            let packets = simulation.trace.filter { $0.linkId == id && $0.protocol != nil }.filter {
+                filter.isEmpty || ($0.protocol ?? "").localizedCaseInsensitiveContains(filter)
                     || $0.info.localizedCaseInsensitiveContains(filter)
-                    || $0.source.contains(filter) || $0.destination.contains(filter)
+                    || ($0.source ?? "").contains(filter) || ($0.destination ?? "").contains(filter)
             }
             VStack(spacing: 0) {
                 HStack(spacing: Theme.Spacing.m) {
@@ -285,7 +328,6 @@ private struct CaptureTab: View {
                     SearchField(prompt: "Display filter, e.g. icmp", text: $filter)
                         .frame(maxWidth: 260)
                     Spacer()
-                    PreviewBadge(milestone: "M2")
                     Button("Stop", systemImage: "stop.fill") { workspace.captureLink = nil }
                         .controlSize(.small)
                     Button("Export .pcap", systemImage: "square.and.arrow.up") {
@@ -297,20 +339,32 @@ private struct CaptureTab: View {
                 .padding(.vertical, Theme.Spacing.xs + 2)
                 PanelDivider(axis: .horizontal)
 
-                HStack(spacing: 0) {
-                    Table(packets, selection: $selectedPacket) {
-                        TableColumn("No.") { p in Text("\(p.id)").font(Theme.Font.mono) }.width(36)
-                        TableColumn("Time") { p in Text(String(format: "%.6f", p.time)).font(Theme.Font.mono) }.width(78)
-                        TableColumn("Source") { p in Text(p.source).font(Theme.Font.mono) }.width(min: 90, ideal: 120)
-                        TableColumn("Destination") { p in Text(p.destination).font(Theme.Font.mono) }.width(min: 90, ideal: 120)
-                        TableColumn("Protocol") { p in ProtocolTag(proto: p.proto) }.width(64)
-                        TableColumn("Length") { p in Text("\(p.length)").font(Theme.Font.mono) }.width(48)
-                        TableColumn("Info") { p in Text(p.info).font(Theme.Font.mono).foregroundStyle(Theme.Palette.textSecondary) }
+                if packets.isEmpty {
+                    EmptyState(glyph: .custom(.capture), title: "Nothing captured yet",
+                               message: "Send a ping that crosses this cable. Every frame on it shows up here.")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    HStack(spacing: 0) {
+                        Table(packets, selection: $selectedPacket) {
+                            TableColumn("No.") { p in
+                                Text("\((packets.firstIndex { $0.id == p.id } ?? 0) + 1)").font(Theme.Font.mono)
+                            }
+                            .width(36)
+                            TableColumn("Time") { p in Text(String(format: "%.6f", p.time)).font(Theme.Font.mono) }.width(78)
+                            TableColumn("Source") { p in Text(p.source ?? "").font(Theme.Font.mono) }.width(min: 90, ideal: 120)
+                            TableColumn("Destination") { p in Text(p.destination ?? "").font(Theme.Font.mono) }.width(min: 90, ideal: 120)
+                            TableColumn("Protocol") { p in
+                                if let proto = p.netProtocol { ProtocolTag(proto: proto) }
+                            }
+                            .width(64)
+                            TableColumn("Length") { p in Text("\(p.length ?? 0)").font(Theme.Font.mono) }.width(48)
+                            TableColumn("Info") { p in Text(p.info).font(Theme.Font.mono).foregroundStyle(Theme.Palette.textSecondary) }
+                        }
+                        .frame(minWidth: 420)
+                        PanelDivider()
+                        PacketDetail(event: packets.first { $0.id == selectedPacket } ?? packets.first)
+                            .frame(width: 320)
                     }
-                    .frame(minWidth: 420)
-                    PanelDivider()
-                    PacketDetail(packet: packets.first { $0.id == selectedPacket })
-                        .frame(width: 320)
                 }
             }
         } else {
@@ -327,25 +381,32 @@ private struct CaptureTab: View {
     }
 }
 
+/// Wireshark-style field tree for a captured frame.
 private struct PacketDetail: View {
-    let packet: PreviewData.Packet?
+    let event: TraceEventInfo?
 
     var body: some View {
         ScrollView {
-            if let packet {
+            if let event {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    ForEach(Array(PreviewData.detail(of: packet).enumerated()), id: \.offset) { index, layer in
+                    ForEach(event.layers.filter { !$0.fields.isEmpty }.reversed(), id: \.number) { layer in
                         DisclosureGroup {
                             VStack(alignment: .leading, spacing: 2) {
-                                ForEach(layer.1, id: \.self) { field in
-                                    Text(field).font(Theme.Font.monoSmall).foregroundStyle(Theme.Palette.textSecondary)
-                                        .textSelection(.enabled)
+                                ForEach(layer.fields, id: \.name) { field in
+                                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
+                                        Text("\(field.name):").foregroundStyle(Theme.Palette.textSecondary)
+                                        Text(field.value).foregroundStyle(Theme.Palette.textPrimary)
+                                    }
+                                    .font(Theme.Font.monoSmall)
+                                    .textSelection(.enabled)
                                 }
                             }
                             .padding(.leading, Theme.Spacing.s)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         } label: {
-                            Text(layer.0).font(Theme.Font.captionMedium).foregroundStyle(Theme.Palette.textPrimary)
+                            Text("L\(layer.number) \(layer.title) · \(layer.fields.first?.value ?? "")")
+                                .font(Theme.Font.captionMedium)
+                                .foregroundStyle(Theme.Palette.textPrimary)
                                 .lineLimit(1)
                         }
                     }

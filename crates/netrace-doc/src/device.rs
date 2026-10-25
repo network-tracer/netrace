@@ -83,6 +83,19 @@ impl DeviceKind {
         }
     }
 
+    /// End devices with a wired NIC: they take an IP configuration directly
+    /// (routers and switches get addresses per interface in the CLI).
+    pub fn is_host(self) -> bool {
+        matches!(
+            self,
+            DeviceKind::Pc
+                | DeviceKind::Laptop
+                | DeviceKind::Server
+                | DeviceKind::Printer
+                | DeviceKind::IpPhone
+        )
+    }
+
     pub fn has_port(self, port: &str) -> bool {
         self.port_names().iter().any(|p| p == port)
     }

@@ -21,5 +21,7 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 netrace-doc.workspace = true
+netrace-engine.workspace = true
+netrace-sim.workspace = true
 thiserror.workspace = true
 uniffi.workspace = true

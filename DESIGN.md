@@ -66,8 +66,10 @@ Meaningful colour:
 
 ## Iconography
 
-- **Device symbols**: drawn in code (`Design/DeviceSymbol.swift`) as filled silhouettes with a
-  1.5 pt outline and simple interior detail. 13 kinds: router, switch, layer 3 switch, hub,
+- **Device symbols**: drawn in code (`Design/DeviceSymbol.swift`) as solid filled silhouettes,
+  like SF Symbols' `.fill` variants: one ink colour, with interior detail (ports, screens,
+  keypads) knocked out in the background colour. Selection is a solid accent band hugging the
+  silhouette. Custom device colours (M2.5) tint the ink. 13 kinds: router, switch, layer 3 switch, hub,
   firewall, access point, cloud, PC, laptop, server, printer, IP phone, smartphone.
 - **SF Symbols** for standard actions (play, stop, zoom, sidebar, search, terminal…).
 - **Custom SVG icons** (`Assets.xcassets/Icons`, 24 pt grid, 1.5 pt round strokes) where SF
@@ -141,13 +143,38 @@ Meaningful colour:
 - **Annotate:** Note tool (N) — click to place, type, click away. Area tool (R) — drag to outline a
   zone and name it. Areas sit behind devices and only their border and label take clicks. Select
   to move, drag the corner handle to resize, double-click to edit; all saved in the file.
+- **Zoom and pan:** pinch zooms around the pointer; two-finger scroll (or the mouse wheel) pans,
+  with momentum; ⌘-scroll zooms around the pointer; ⌘+ / ⌘− / ⌘0 and the zoom control zoom around
+  the middle of the view; ⌘9 fits the topology. The canvas has no edges.
 - **Semantic zoom:** interface labels hide below 70 %; device names grow to stay readable.
 - The bottom panel maximises (⌥⌘↑) so the console can take the window; the lab stays visible in
   the right pane (⌥⌘4).
 - Status is shape plus colour everywhere: filled = up, half = suspended, ring = down.
 - Right-click a device: console, rename, configure, capture, power, duplicate, delete.
   Right-click a cable: capture, conditioning, delete. Right-click empty canvas: lab actions.
+- **Simulate:** give end devices an address in the inspector's IP Configuration. Add PDU (toolbar,
+  ⇧⌘P or the Events tab), then click the source and the destination. In Realtime the result
+  appears at once; in Simulation, play or step and watch every frame travel, including flooded
+  copies, with a red ✕ where a device ignores or drops one. PCs also accept `ping`, `ipconfig`
+  and `arp -a` in their console.
+- **Packet inspector:** selecting an event shows one plain sentence about what the device did and
+  why, then a layer strip (L1–L4) where only the layers that device read or built are highlighted;
+  raw fields expand on demand, with fields set by that device marked. Previous / Next steps
+  through the whole ping.
 - ⌘K opens the command palette for every action and every device kind.
+
+## Planned visual language (M2.5 and later)
+
+- **Colour on the canvas** comes from a fixed set of system colours (blue, green, orange, red,
+  purple, teal, gray) so diagrams stay legible in both modes. Chrome stays monotone; colour is
+  reserved for things the user chose or that carry meaning (status, protocols, VLANs).
+- **Cable styles:** copper solid, fibre double line, console dotted, serial zig-zag, crossover
+  dashed. Colour is optional and per cable.
+- **Shapes:** rectangle, rounded rectangle, ellipse, *n*-sided polygon, line, arrow; fill, border
+  and opacity; behind devices; snapping, grouping, z-order, lock; devices inside a shape move with it.
+- **Feature overlays** (see SCOPE.md, *Configured features are visible*): small badges at
+  interfaces (NAT inside/outside, ACL shield, DHCP), VLAN tints, STP blocked-port bars, OSPF area
+  outlines. Badges use SF Symbols where they exist, are 12 pt, and never cover a device name.
 
 ## Status of the interface
 
