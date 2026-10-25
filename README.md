@@ -1,0 +1,52 @@
+# netrace
+
+A native macOS network simulator for CCNA students. Rust simulation core,
+SwiftUI/AppKit app. See [SCOPE.md](SCOPE.md) for the v1.0 plan.
+
+## Requirements
+
+- macOS 15+, Xcode 26+
+- Rust (stable) via rustup; `rustup target add x86_64-apple-darwin` for universal release builds
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
+
+## Getting started
+
+```bash
+make run     # build the Rust core, generate the Xcode project, build and launch
+make open    # same preparation, then open app/Netrace.xcodeproj in Xcode
+make test    # Rust tests
+make lint    # rustfmt + clippy
+```
+
+Open `examples/starter.netrace` for a small sample topology.
+
+After changing anything in `crates/`, run `make core` before building in Xcode:
+the app links the static library and Swift bindings that step produces.
+
+## Layout
+
+```
+crates/
+  netrace-sim/   deterministic event scheduler, virtual clock, seeded RNG
+  netrace-doc/   project model + .netrace file format (JSON, validated on load)
+  netrace-ffi/   UniFFI bridge: the only API the Swift app sees
+app/
+  project.yml    XcodeGen spec (the .xcodeproj is generated, not committed)
+  Netrace/       SwiftUI app: document, canvas, library, inspector, design tokens
+scripts/
+  build-core.sh  Rust → NetraceCore.xcframework + Generated/netrace_ffi.swift
+examples/        sample projects
+```
+
+Generated and git-ignored: `app/Netrace.xcodeproj`, `app/Frameworks/`,
+`app/Netrace/Core/Generated/`, `app/Support/Info.plist`, `app/Support/Netrace.entitlements`.
+
+## How the pieces talk
+
+The Swift app owns windows and rendering; the Rust core owns every rule.
+Swift calls coarse commands on a `Project` object (`addDevice`, `moveDevice`,
+`connect`, …) and redraws from the plain-value `ProjectSnapshot` the core returns.
+Every edit registers its inverse with the window's undo manager, which is also
+how macOS tracks unsaved changes.
+
+A `.netrace` file is a package (folder) containing `project.json`.

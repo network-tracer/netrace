@@ -1,0 +1,12 @@
+[package]
+name = "netrace-doc"
+description = "netrace project model and .netrace file format"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

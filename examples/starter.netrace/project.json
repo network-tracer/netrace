@@ -1,0 +1,14 @@
+{
+  "format": "netrace",
+  "version": 1,
+  "next_id": 6,
+  "devices": [
+    { "id": 1, "kind": "router", "name": "R1", "position": { "x": 360.0, "y": 120.0 } },
+    { "id": 2, "kind": "l2_switch", "name": "SW1", "position": { "x": 360.0, "y": 264.0 } },
+    { "id": 3, "kind": "pc", "name": "PC1", "position": { "x": 240.0, "y": 408.0 } }
+  ],
+  "links": [
+    { "id": 4, "a": { "device": 1, "port": "GigabitEthernet0/0" }, "b": { "device": 2, "port": "GigabitEthernet0/1" }, "medium": "copper" },
+    { "id": 5, "a": { "device": 2, "port": "FastEthernet0/1" }, "b": { "device": 3, "port": "FastEthernet0" }, "medium": "copper" }
+  ]
+}

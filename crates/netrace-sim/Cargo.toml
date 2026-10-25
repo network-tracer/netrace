@@ -1,0 +1,9 @@
+[package]
+name = "netrace-sim"
+description = "Deterministic discrete-event scheduler and virtual clock for netrace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

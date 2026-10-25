@@ -1,0 +1,61 @@
+# XcodeGen spec for the macOS app. Generate the project with `make project`;
+# Netrace.xcodeproj is git-ignored, so edit this file rather than Xcode's settings.
+name: Netrace
+
+options:
+  bundleIdPrefix: app.netrace
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Must match MACOSX_DEPLOYMENT_TARGET in scripts/build-core.sh.
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  Netrace:
+    type: application
+    platform: macOS
+    sources:
+      - path: Netrace
+    dependencies:
+      - framework: Frameworks/NetraceCore.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.netrace.mac
+        PRODUCT_NAME: Netrace
+        # Ad-hoc "Sign to Run Locally" until there is a Developer ID team.
+        # Turn on ENABLE_HARDENED_RUNTIME together with real signing.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    entitlements:
+      path: Support/Netrace.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleDisplayName: netrace
+        LSApplicationCategoryType: public.app-category.education
+        # Keep the classic (pre-Liquid Glass) appearance on macOS 26+.
+        # Apple has said this key is temporary; custom chrome replaces it later.
+        UIDesignRequiresCompatibility: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: netrace Project
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSTypeIsPackage: true
+            LSItemContentTypes: [app.netrace.project]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: app.netrace.project
+            UTTypeDescription: netrace Project
+            UTTypeConformsTo: [com.apple.package, public.composite-content]
+            UTTypeTagSpecification:
+              public.filename-extension: [netrace]

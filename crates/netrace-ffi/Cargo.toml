@@ -1,0 +1,25 @@
+[package]
+name = "netrace-ffi"
+description = "UniFFI bridge exposing the netrace core to the Swift app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "netrace_ffi"
+# staticlib is linked into the app; cdylib is only read by uniffi-bindgen.
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bin]]
+name = "uniffi-bindgen-swift"
+path = "src/bin/uniffi-bindgen-swift.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+netrace-doc.workspace = true
+thiserror.workspace = true
+uniffi.workspace = true
