@@ -1,4 +1,4 @@
-use crate::{DeviceId, DeviceKind, LinkId};
+use crate::{AnnotationId, DeviceId, DeviceKind, LinkId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DocError {
@@ -18,6 +18,12 @@ pub enum DocError {
 
     #[error("link {0} appears more than once")]
     DuplicateLink(LinkId),
+
+    #[error("annotation {0} appears more than once")]
+    DuplicateAnnotation(AnnotationId),
+
+    #[error("annotation {0} does not exist")]
+    UnknownAnnotation(AnnotationId),
 
     #[error("device {0} does not exist")]
     UnknownDevice(DeviceId),

@@ -275,8 +275,8 @@ struct DeviceContextMenu: View {
         }
         Divider()
         Button("Duplicate", systemImage: "plus.square.on.square") {
-            let copy = document.addDevice(device.kind, at: CGPoint(x: device.x + 48, y: device.y + 48).snapped, undoManager: undoManager)
-            workspace.selectDevices([copy.id])
+            workspace.selectDevices(Set(targets))
+            workspace.duplicateRequests += 1
         }
         Divider()
         Button("Delete", systemImage: "trash", role: .destructive) {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The topology canvas: a scrollable, zoomable world with devices, cables
 /// and (in simulation mode) packets, plus floating zoom / minimap / timeline.
@@ -18,6 +19,12 @@ struct CanvasView: View {
     @State private var magnifyBase: CGFloat?
     @State private var panStart: CGPoint?
     @State private var hasFittedOnOpen = false
+    /// Live frames of annotations being moved or resized (committed on release).
+    @State private var liveAnnotationRects: [UInt64: CGRect] = [:]
+    @State private var marquee: CGRect?
+    @State private var areaDraft: CGRect?
+    /// Space held: drag pans the canvas with any tool (Figma convention).
+    @State private var spacePanning = false
     @FocusState private var isFocused: Bool
 
     struct CableDrag {
@@ -37,6 +44,7 @@ struct CanvasView: View {
             .scrollPosition($scrollPosition)
             .onScrollGeometryChange(for: CGRect.self, of: { $0.visibleRect }) { _, rect in
                 visibleRect = rect
+                workspace.viewportCenter = CGPoint(x: rect.midX / workspace.zoom, y: rect.midY / workspace.zoom)
                 // Frame the topology once the viewport size is known.
                 if !hasFittedOnOpen && rect.width > 0 {
                     hasFittedOnOpen = true
@@ -45,7 +53,7 @@ struct CanvasView: View {
             }
             .background(Theme.Palette.canvas)
             .simultaneousGesture(magnifyGesture)
-            .simultaneousGesture(panGesture, including: workspace.tool == .hand ? .all : .subviews)
+            .simultaneousGesture(panGesture, including: workspace.tool == .hand || spacePanning ? .all : .subviews)
             .dropDestination(for: String.self) { items, location in
                 guard let kind = items.first.flatMap(DeviceKind.init(dragIdentifier:)) else { return false }
                 let point = CGPoint(x: (location.x + visibleRect.minX) / workspace.zoom,
@@ -77,8 +85,9 @@ struct CanvasView: View {
             return .handled
         }
         .onKeyPress(.escape) {
-            if workspace.renamingDevice != nil {
+            if workspace.renamingDevice != nil || workspace.editingAnnotation != nil {
                 workspace.renamingDevice = nil
+                workspace.editingAnnotation = nil
                 return .handled
             }
             if workspace.tool != .select || pendingCableSource != nil {
@@ -95,7 +104,24 @@ struct CanvasView: View {
             workspace.openConsole(for: id)
             return .handled
         }
+        .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow], phases: [.down, .repeat], action: nudge)
+        .onKeyPress(.space, phases: [.down, .repeat, .up]) { press in
+            guard !isEditingText else { return .ignored }
+            spacePanning = press.phase != .up
+            return .handled
+        }
         .onDeleteCommand(perform: deleteSelection)
+        .onCommand(#selector(NSText.selectAll(_:))) {
+            workspace.selectDevices(Set(document.state.devices.map(\.id)))
+        }
+        .onCopyCommand(perform: copySelection)
+        .onCutCommand {
+            let items = copySelection()
+            deleteSelection()
+            return items
+        }
+        .onPasteCommand(of: [.plainText]) { _ in pasteFromPasteboard() }
+        .onChange(of: workspace.duplicateRequests) { _, _ in duplicateSelection() }
         .onChange(of: workspace.tool) { _, _ in pendingCableSource = nil }
         .task(id: workspace.isPlaying) { await runSimulationClock() }
     }
@@ -114,7 +140,15 @@ struct CanvasView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .named(Self.space)) { location in backgroundTapped(at: location) }
+            .gesture(backgroundDrag, including: backgroundDragEnabled ? .all : .subviews)
             .contextMenu { CanvasContextMenu(document: document, workspace: workspace, onZoomToFit: zoomToFit) }
+
+            // Areas sit behind cables and devices.
+            ForEach(document.state.annotations.filter { $0.kind == .area }) { area in
+                AreaView(annotation: area, rect: liveAnnotationRects[area.id] ?? area.rect,
+                         isSelected: workspace.selectedAnnotation == area.id,
+                         isEditing: workspace.editingAnnotation == area.id, actions: actions(for: area))
+            }
 
             LinksLayer(document: document, workspace: workspace, positions: positions)
                 .allowsHitTesting(false)
@@ -136,13 +170,29 @@ struct CanvasView: View {
                 }
             }
 
+            ForEach(document.state.annotations.filter { $0.kind == .note }) { note in
+                NoteView(annotation: note, rect: liveAnnotationRects[note.id] ?? note.rect,
+                         isSelected: workspace.selectedAnnotation == note.id,
+                         isEditing: workspace.editingAnnotation == note.id, actions: actions(for: note))
+            }
+
             if let drag = cableDrag, let from = positions[drag.from] {
                 CableDraftLine(from: from, to: drag.to)
+            }
+
+            if let rect = areaDraft ?? marquee {
+                let shape = RoundedRectangle(cornerRadius: areaDraft != nil ? Theme.Radius.l : 2)
+                shape.fill(Theme.Palette.accent.opacity(0.08))
+                    .overlay(shape.stroke(Theme.Palette.accent, lineWidth: 1 / workspace.zoom))
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    .allowsHitTesting(false)
             }
 
             ForEach(document.state.devices) { device in
                 NodeView(device: device, workspace: workspace,
                          isSelected: workspace.selection.contains(device.id) || pendingCableSource == device.id,
+                         zoom: workspace.zoom,
                          onRename: { name in rename(device, to: name) })
                     // Before .position(), so the location is relative to the symbol's frame.
                     .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
@@ -168,10 +218,11 @@ struct CanvasView: View {
         .scaleEffect(workspace.zoom, anchor: .topLeading)
     }
 
-    /// Big enough for every device plus room to grow.
+    /// Big enough for every device and annotation, plus room to grow.
     private var worldSize: CGSize {
-        let maxX = document.state.devices.map(\.x).max() ?? 0
-        let maxY = document.state.devices.map(\.y).max() ?? 0
+        let annotations = document.state.annotations.map(\.rect)
+        let maxX = (document.state.devices.map { CGFloat($0.x) } + annotations.map(\.maxX)).max() ?? 0
+        let maxY = (document.state.devices.map { CGFloat($0.y) } + annotations.map(\.maxY)).max() ?? 0
         return CGSize(width: max(2400, maxX + 800), height: max(1600, maxY + 600))
     }
 
@@ -186,15 +237,163 @@ struct CanvasView: View {
 
     /// True while a text field (its field editor) has keyboard focus.
     private var isEditingText: Bool {
-        workspace.renamingDevice != nil || NSApp.keyWindow?.firstResponder is NSText
+        workspace.renamingDevice != nil || workspace.editingAnnotation != nil
+            || NSApp.keyWindow?.firstResponder is NSText
+    }
+
+    private var backgroundDragEnabled: Bool {
+        (workspace.tool == .select || workspace.tool == .rectangle) && !spacePanning
+    }
+
+    /// Select tool: rubber-band selection. Area tool: draw the area.
+    private var backgroundDrag: some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                let rect = CGRect(corner: value.startLocation, to: value.location)
+                if workspace.tool == .rectangle { areaDraft = rect } else { marquee = rect }
+            }
+            .onEnded { _ in
+                if let rect = areaDraft {
+                    areaDraft = nil
+                    createArea(rect)
+                } else if let rect = marquee {
+                    marquee = nil
+                    let inside = Set(document.state.devices.filter { rect.contains($0.position) }.map(\.id))
+                    workspace.selectDevices(NSEvent.modifierFlags.contains(.shift) ? workspace.selection.union(inside) : inside)
+                    isFocused = true
+                }
+            }
+    }
+
+    private func createNote(at point: CGPoint) {
+        let origin = point.snapped
+        let note = document.addAnnotation(.note, in: CGRect(x: origin.x, y: origin.y, width: 180, height: 72),
+                                          text: "", undoManager: undoManager)
+        workspace.tool = .select
+        workspace.selectAnnotation(note.id)
+        workspace.editingAnnotation = note.id
+    }
+
+    /// Tiny drags (or a click) make a default-sized area.
+    private func createArea(_ rect: CGRect) {
+        let origin = rect.origin.snapped
+        let frame = rect.width < 40 || rect.height < 40
+            ? CGRect(origin: origin, size: CGSize(width: 264, height: 180))
+            : CGRect(origin: origin, size: CGSize(width: rect.width.rounded(), height: rect.height.rounded()))
+        let area = document.addAnnotation(.area, in: frame, text: "", undoManager: undoManager)
+        workspace.tool = .select
+        workspace.selectAnnotation(area.id)
+        workspace.editingAnnotation = area.id
+    }
+
+    private func actions(for annotation: AnnotationInfo) -> AnnotationActions {
+        let id = annotation.id
+        let name = annotation.kind == .note ? "Note" : "Area"
+        return AnnotationActions(
+            select: {
+                isFocused = true
+                workspace.selectAnnotation(id)
+            },
+            startEditing: {
+                workspace.selectAnnotation(id)
+                workspace.editingAnnotation = id
+            },
+            move: { translation, ended in
+                guard workspace.tool == .select else { return }
+                let rect = annotation.rect.offsetBy(dx: translation.width, dy: translation.height)
+                if ended {
+                    liveAnnotationRects[id] = nil
+                    let origin = rect.origin.snapped
+                    document.updateAnnotation(id, rect: CGRect(origin: origin, size: rect.size), text: annotation.text,
+                                              actionName: "Move \(name)", undoManager: undoManager)
+                } else {
+                    if workspace.selectedAnnotation != id { workspace.selectAnnotation(id) }
+                    liveAnnotationRects[id] = rect
+                }
+            },
+            resize: { translation, ended in
+                let rect = CGRect(origin: annotation.rect.origin,
+                                  size: CGSize(width: max(60, annotation.width + translation.width),
+                                               height: max(36, annotation.height + translation.height)))
+                if ended {
+                    liveAnnotationRects[id] = nil
+                    document.updateAnnotation(id, rect: rect, text: annotation.text,
+                                              actionName: "Resize \(name)", undoManager: undoManager)
+                } else {
+                    liveAnnotationRects[id] = rect
+                }
+            },
+            commitText: { text in
+                workspace.editingAnnotation = nil
+                document.updateAnnotation(id, rect: annotation.rect, text: text,
+                                          actionName: "Edit \(name)", undoManager: undoManager)
+            },
+            cancelEditing: { workspace.editingAnnotation = nil }
+        )
+    }
+
+    private func nudge(_ press: KeyPress) -> KeyPress.Result {
+        guard !isEditingText else { return .ignored }
+        let step: CGFloat = press.modifiers.contains(.shift) ? Theme.Size.gridSpacing * 2 : Theme.Size.gridSpacing / 2
+        var delta = CGSize.zero
+        switch press.key {
+        case .upArrow: delta.height = -step
+        case .downArrow: delta.height = step
+        case .leftArrow: delta.width = -step
+        case .rightArrow: delta.width = step
+        default: return .ignored
+        }
+        if !workspace.selection.isEmpty {
+            for id in workspace.selection {
+                guard let device = document.device(id) else { continue }
+                document.moveDevice(id, to: CGPoint(x: device.x + delta.width, y: device.y + delta.height),
+                                    undoManager: undoManager)
+            }
+            undoManager?.setActionName("Nudge")
+            return .handled
+        }
+        if let id = workspace.selectedAnnotation, let annotation = document.annotation(id) {
+            document.updateAnnotation(id, rect: annotation.rect.offsetBy(dx: delta.width, dy: delta.height),
+                                      text: annotation.text, actionName: "Nudge", undoManager: undoManager)
+            return .handled
+        }
+        return .ignored
+    }
+
+    private func copySelection() -> [NSItemProvider] {
+        guard let clipboard = TopologyClipboard(selection: workspace.selection, in: document.state) else { return [] }
+        return [NSItemProvider(object: clipboard.json as NSString)]
+    }
+
+    private func pasteFromPasteboard() {
+        guard let text = NSPasteboard.general.string(forType: .string),
+              let clipboard = TopologyClipboard(json: text) else {
+            workspace.flash("Nothing to paste. Copy some devices first.")
+            return
+        }
+        let center = Placement.freeSpot(near: workspace.viewportCenter, avoiding: document.state.devices.map(\.position))
+        let ids = document.paste(clipboard, centeredAt: center, actionName: "Paste", undoManager: undoManager)
+        workspace.selectDevices(Set(ids))
+    }
+
+    /// Copies the selection next to itself, keeping the cables between the copies.
+    private func duplicateSelection() {
+        let selected = document.state.devices.filter { workspace.selection.contains($0.id) }
+        guard let clipboard = TopologyClipboard(selection: workspace.selection, in: document.state) else { return }
+        let center = CGPoint(x: selected.map(\.x).reduce(0, +) / Double(selected.count) + 48,
+                             y: selected.map(\.y).reduce(0, +) / Double(selected.count) + 48)
+        let ids = document.paste(clipboard, centeredAt: center, actionName: "Duplicate", undoManager: undoManager)
+        workspace.selectDevices(Set(ids))
     }
 
     private func backgroundTapped(at location: CGPoint) {
         isFocused = true
         pendingCableSource = nil
         switch workspace.tool {
-        case .note, .rectangle:
-            workspace.flash("\(workspace.tool.title)s arrive with the canvas milestone (M1).")
+        case .note:
+            createNote(at: location)
+        case .rectangle:
+            createArea(CGRect(origin: location, size: .zero))
         default:
             if let link = LinksLayer.hitTest(location, links: document.state.links, positions: displayedPositions,
                                               tolerance: 6 / workspace.zoom) {
@@ -341,6 +540,8 @@ struct CanvasView: View {
             document.removeDevices(workspace.selection, undoManager: undoManager)
         } else if let link = workspace.selectedLink {
             document.disconnect(link, undoManager: undoManager)
+        } else if let annotation = workspace.selectedAnnotation {
+            document.removeAnnotation(annotation, undoManager: undoManager)
         }
     }
 
@@ -375,7 +576,9 @@ struct CanvasView: View {
         let xs = document.state.devices.map(\.x), ys = document.state.devices.map(\.y)
         let bounds = CGRect(x: xs.min()! - margin, y: ys.min()! - margin,
                             width: xs.max()! - xs.min()! + margin * 2, height: ys.max()! - ys.min()! + margin * 2)
-        let zoom = min(visibleRect.width / bounds.width, visibleRect.height / bounds.height, 1)
+        // Leave room for the floating minimap / timeline along the bottom edge.
+        let bottomInset: CGFloat = workspace.showsMinimap || workspace.mode == .simulation ? 130 : 0
+        let zoom = min(visibleRect.width / bounds.width, (visibleRect.height - bottomInset) / bounds.height, 1)
         workspace.setZoom(zoom)
         // Scroll after the content has re-laid out at the new zoom.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -402,6 +605,13 @@ struct CanvasView: View {
     }
 }
 
+extension CGRect {
+    /// The rectangle spanning two corner points, in any order.
+    init(corner a: CGPoint, to b: CGPoint) {
+        self.init(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
+}
+
 extension CGPoint {
     /// Snaps to half the grid spacing so devices line up without feeling locked.
     var snapped: CGPoint {
@@ -416,8 +626,13 @@ private struct NodeView: View {
     let device: DeviceInfo
     @ObservedObject var workspace: WorkspaceModel
     let isSelected: Bool
+    let zoom: CGFloat
     /// Returns false if the name was rejected, keeping the field open.
     let onRename: (String) -> Bool
+
+    /// Semantic zoom: names grow as the canvas shrinks so they stay readable
+    /// (about 10 pt on screen at minimum).
+    private var labelScale: CGFloat { min(2.2, max(1, 0.85 / zoom)) }
 
     @State private var draft = ""
     @FocusState private var fieldFocused: Bool
@@ -438,7 +653,7 @@ private struct NodeView: View {
                     if workspace.renamingDevice == device.id {
                         nameField
                     } else {
-                        nameLabel
+                        nameLabel.scaleEffect(labelScale, anchor: .top)
                     }
                 }
                 .alignmentGuide(.bottom) { $0[.top] - 6 }

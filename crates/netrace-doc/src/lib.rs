@@ -4,10 +4,12 @@
 //! serialised [`Project`]. This crate owns that format: loading validates every
 //! reference so the rest of the app can trust the model it gets.
 
+mod annotation;
 mod device;
 mod error;
 mod project;
 
+pub use annotation::{Annotation, AnnotationId, AnnotationKind, Rect, RemovedAnnotation};
 pub use device::{DeviceKind, Medium};
 pub use error::DocError;
 pub use project::{Device, DeviceId, Endpoint, Link, LinkId, Point, Project, RemovedDevice};

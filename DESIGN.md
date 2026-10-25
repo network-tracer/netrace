@@ -134,6 +134,14 @@ Meaningful colour:
 - **Double-click a device** to open its console (focused, ready to type). **Return** does the same
   for the selected device. **Double-click its name** (or edit the inspector title, or Rename… in the
   context menu) to rename it; hostnames follow IOS rules and must be unique.
+- **Arrange:** drag on empty canvas (even inside an area) for marquee selection, Shift adds;
+  ⌘A selects all; arrow keys nudge (Shift for bigger steps); hold Space and drag to pan with any
+  tool. ⌘C / ⌘V / ⌘D copy, paste and duplicate devices *with the cables between them*; copies get
+  fresh hostnames and land in view.
+- **Annotate:** Note tool (N) — click to place, type, click away. Area tool (R) — drag to outline a
+  zone and name it. Areas sit behind devices and only their border and label take clicks. Select
+  to move, drag the corner handle to resize, double-click to edit; all saved in the file.
+- **Semantic zoom:** interface labels hide below 70 %; device names grow to stay readable.
 - The bottom panel maximises (⌥⌘↑) so the console can take the window; the lab stays visible in
   the right pane (⌥⌘4).
 - Status is shape plus colour everywhere: filled = up, half = suspended, ring = down.

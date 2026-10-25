@@ -90,10 +90,35 @@ pub struct LinkInfo {
     pub medium: Medium,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AnnotationKind {
+    Note,
+    Area,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AnnotationInfo {
+    pub id: u64,
+    pub kind: AnnotationKind,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub text: String,
+}
+
+/// Lets undo put a deleted annotation back in its stacking slot.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct RemovedAnnotationInfo {
+    pub annotation: AnnotationInfo,
+    pub index: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ProjectSnapshot {
     pub devices: Vec<DeviceInfo>,
     pub links: Vec<LinkInfo>,
+    pub annotations: Vec<AnnotationInfo>,
 }
 
 /// Opaque-to-the-user record that lets undo put a deleted device back.
@@ -138,6 +163,11 @@ impl Project {
         ProjectSnapshot {
             devices: project.devices().iter().map(DeviceInfo::from).collect(),
             links: project.links().iter().map(LinkInfo::from).collect(),
+            annotations: project
+                .annotations()
+                .iter()
+                .map(AnnotationInfo::from)
+                .collect(),
         }
     }
 
@@ -178,6 +208,67 @@ impl Project {
         };
         self.lock()
             .restore_device(removed)
+            .map_err(invalid_operation)
+    }
+
+    pub fn add_annotation(
+        &self,
+        kind: AnnotationKind,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        text: String,
+    ) -> AnnotationInfo {
+        let rect = doc::Rect::new(x, y, width, height);
+        AnnotationInfo::from(self.lock().add_annotation(kind.into(), rect, &text))
+    }
+
+    /// Replaces an annotation's frame and text; returns the previous version (for undo).
+    pub fn update_annotation(
+        &self,
+        id: u64,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        text: String,
+    ) -> Result<AnnotationInfo, CoreError> {
+        let previous = self
+            .lock()
+            .update_annotation(
+                doc::AnnotationId(id),
+                doc::Rect::new(x, y, width, height),
+                &text,
+            )
+            .map_err(invalid_operation)?;
+        Ok(AnnotationInfo::from(&previous))
+    }
+
+    pub fn remove_annotation(&self, id: u64) -> Result<RemovedAnnotationInfo, CoreError> {
+        let removed = self
+            .lock()
+            .remove_annotation(doc::AnnotationId(id))
+            .map_err(invalid_operation)?;
+        Ok(RemovedAnnotationInfo {
+            annotation: AnnotationInfo::from(&removed.annotation),
+            index: removed.index as u64,
+        })
+    }
+
+    pub fn restore_annotation(&self, removed: RemovedAnnotationInfo) -> Result<(), CoreError> {
+        let a = removed.annotation;
+        let removed = doc::RemovedAnnotation {
+            annotation: doc::Annotation {
+                id: doc::AnnotationId(a.id),
+                kind: a.kind.into(),
+                rect: doc::Rect::new(a.x, a.y, a.width, a.height),
+                text: a.text,
+            },
+            index: usize::try_from(removed.index).unwrap_or(usize::MAX),
+        };
+        self.lock()
+            .restore_annotation(removed)
             .map_err(invalid_operation)
     }
 
@@ -273,6 +364,38 @@ impl From<doc::Medium> for Medium {
         match medium {
             doc::Medium::Copper => Medium::Copper,
             doc::Medium::Fiber => Medium::Fiber,
+        }
+    }
+}
+
+impl From<AnnotationKind> for doc::AnnotationKind {
+    fn from(kind: AnnotationKind) -> Self {
+        match kind {
+            AnnotationKind::Note => doc::AnnotationKind::Note,
+            AnnotationKind::Area => doc::AnnotationKind::Area,
+        }
+    }
+}
+
+impl From<doc::AnnotationKind> for AnnotationKind {
+    fn from(kind: doc::AnnotationKind) -> Self {
+        match kind {
+            doc::AnnotationKind::Note => AnnotationKind::Note,
+            doc::AnnotationKind::Area => AnnotationKind::Area,
+        }
+    }
+}
+
+impl From<&doc::Annotation> for AnnotationInfo {
+    fn from(a: &doc::Annotation) -> Self {
+        AnnotationInfo {
+            id: a.id.0,
+            kind: a.kind.into(),
+            x: a.rect.x,
+            y: a.rect.y,
+            width: a.rect.width,
+            height: a.rect.height,
+            text: a.text.clone(),
         }
     }
 }
@@ -398,6 +521,23 @@ mod tests {
         assert!(project.snapshot().links.is_empty());
         project.restore_device(removed).unwrap();
         assert_eq!(project.snapshot(), before);
+    }
+
+    #[test]
+    fn annotation_lifecycle_through_the_bridge() {
+        let project = Project::new();
+        let note =
+            project.add_annotation(AnnotationKind::Note, 10.0, 10.0, 160.0, 64.0, "Core".into());
+        let previous = project
+            .update_annotation(note.id, 20.0, 20.0, 200.0, 80.0, "Core layer".into())
+            .unwrap();
+        assert_eq!(previous, note);
+        let removed = project.remove_annotation(note.id).unwrap();
+        assert!(project.snapshot().annotations.is_empty());
+        project.restore_annotation(removed).unwrap();
+        assert_eq!(project.snapshot().annotations[0].text, "Core layer");
+        let reopened = Project::from_json(project.to_json()).unwrap();
+        assert_eq!(reopened.snapshot(), project.snapshot());
     }
 
     #[test]

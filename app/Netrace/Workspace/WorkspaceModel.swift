@@ -166,12 +166,20 @@ final class WorkspaceModel: ObservableObject {
     @Published var showsGrid = true
     @Published var showsMinimap = true
     @Published var librarySearch = ""
+    @Published var topologySearch = ""
     @Published var hint: String?
 
     // Selection
     @Published var selection: Set<UInt64> = []
     @Published var selectedLink: UInt64?
+    @Published var selectedAnnotation: UInt64?
+    @Published var editingAnnotation: UInt64?
     @Published var renamingDevice: UInt64?
+    /// Bumped by the Duplicate command; the canvas performs it (it owns the undo manager).
+    @Published var duplicateRequests = 0
+    /// Centre of the visible canvas in world coordinates. Not published:
+    /// it changes on every scroll frame and only placement code reads it.
+    var viewportCenter = CGPoint(x: 400, y: 300)
     @Published var pendingConnection: PendingConnection?
 
     // Preview state for features that arrive in later milestones.
@@ -192,16 +200,26 @@ final class WorkspaceModel: ObservableObject {
     func selectDevices(_ ids: Set<UInt64>) {
         selection = ids
         selectedLink = nil
+        selectedAnnotation = nil
     }
 
     func selectLink(_ id: UInt64?) {
         selectedLink = id
         selection = []
+        selectedAnnotation = nil
+    }
+
+    func selectAnnotation(_ id: UInt64?) {
+        selectedAnnotation = id
+        selection = []
+        selectedLink = nil
     }
 
     func clearSelection() {
         selection = []
         selectedLink = nil
+        selectedAnnotation = nil
+        editingAnnotation = nil
     }
 
     func powerState(_ id: UInt64) -> PowerState { power[id] ?? .running }
@@ -240,8 +258,10 @@ final class WorkspaceModel: ObservableObject {
         }
     }
 
-    /// Drops references to devices and links that no longer exist.
-    func prune(devices: Set<UInt64>, links: Set<UInt64>) {
+    /// Drops references to devices, links and annotations that no longer exist.
+    func prune(devices: Set<UInt64>, links: Set<UInt64>, annotations: Set<UInt64>) {
+        if let id = selectedAnnotation, !annotations.contains(id) { selectedAnnotation = nil }
+        if let id = editingAnnotation, !annotations.contains(id) { editingAnnotation = nil }
         selection.formIntersection(devices)
         if let link = selectedLink, !links.contains(link) { selectedLink = nil }
         consoleSessions.removeAll { !devices.contains($0) }

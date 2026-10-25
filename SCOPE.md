@@ -167,7 +167,7 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | # | Milestone | Done when |
 |---|---|---|
 | M0 ✅ | Foundation | Cargo workspace with event scheduler and tests, UniFFI bindings built into an XCFramework by one script, Xcode app links it, `.netrace` document opens and saves |
-| M1 | Canvas | Place, cable (with port choice), rename, arrange and annotate devices: notes and areas saved in the document, marquee selection, copy/paste/duplicate keeping cables between copies, arrow-key nudging, semantic zoom, new devices placed in view, Space-drag panning; all undoable |
+| M1 ✅ | Canvas | Place, cable (with port choice), rename, arrange and annotate devices: notes and areas saved in the document, marquee selection, copy/paste/duplicate keeping cables between copies, arrow-key nudging, semantic zoom, new devices placed in view, Space-drag panning; all undoable |
 | M2 | Layer 2 + ARP/ICMP | Two PCs on a switch ping each other; visualiser v1 shows the ARP + ICMP exchange with the plain-language packet inspector |
 | M3 | CLI + routing | IOS parser, router interfaces, static routes, traceroute, subinterfaces, SVIs; multi-line paste, config snippets, configs saved in the file, duplicate with variations |
 | M4 | Switching | VLANs, trunks, STP, CDP/LLDP, port security |

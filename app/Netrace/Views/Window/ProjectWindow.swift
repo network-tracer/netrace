@@ -52,7 +52,8 @@ struct ProjectWindow: View {
         .focusedSceneObject(workspace)
         .focusedSceneObject(document)
         .onChange(of: document.state) { _, state in
-            workspace.prune(devices: Set(state.devices.map(\.id)), links: Set(state.links.map(\.id)))
+            workspace.prune(devices: Set(state.devices.map(\.id)), links: Set(state.links.map(\.id)),
+                            annotations: Set(state.annotations.map(\.id)))
         }
     }
 }

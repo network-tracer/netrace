@@ -6,6 +6,12 @@ struct WorkspaceCommands: Commands {
     @FocusedObject private var document: ProjectDocument?
 
     var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            Button("Duplicate") { workspace?.duplicateRequests += 1 }
+                .keyboardShortcut("d")
+                .disabled(workspace?.selection.isEmpty ?? true)
+        }
+
         CommandGroup(after: .toolbar) {
             Button("Command Palette…") { workspace?.showsCommandPalette = true }
                 .keyboardShortcut("k")

@@ -68,7 +68,8 @@ struct LinksLayer: View {
                     context.draw(badge, in: CGRect(x: mid.x - 7, y: mid.y - 7, width: 14, height: 14))
                 }
 
-                guard workspace.showsInterfaceLabels, length > edgeA + edgeB + 100 else { continue }
+                // Semantic zoom: below 70 % the labels would be unreadably small.
+                guard workspace.showsInterfaceLabels, workspace.zoom >= 0.7, length > edgeA + edgeB + 100 else { continue }
                 for (center, edge, sign, port) in [(a, edgeA, 1.0, link.a.port), (b, edgeB, -1.0, link.b.port)] {
                     // Cables leaving downward pass the device's name label; start labels below it.
                     let clearance: CGFloat = dir.y * sign > 0.5 ? 46 : 26

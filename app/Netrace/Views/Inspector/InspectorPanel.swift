@@ -10,6 +10,8 @@ struct InspectorPanel: View {
         Group {
             if workspace.selection.count == 1, let id = workspace.selection.first, let device = document.device(id) {
                 DeviceInspector(device: device, document: document, workspace: workspace)
+            } else if let id = workspace.selectedAnnotation, let annotation = document.annotation(id) {
+                AnnotationInspector(annotation: annotation, document: document, workspace: workspace)
             } else if let id = workspace.selectedLink, let link = document.link(id) {
                 LinkInspector(link: link, document: document, workspace: workspace)
             } else if workspace.selection.count > 1 {
@@ -388,6 +390,60 @@ private struct LinkInspector: View {
             Slider(value: value, in: range)
                 .controlSize(.small)
         }
+    }
+}
+
+// MARK: - Annotation
+
+private struct AnnotationInspector: View {
+    let annotation: AnnotationInfo
+    @ObservedObject var document: ProjectDocument
+    @ObservedObject var workspace: WorkspaceModel
+    @Environment(\.undoManager) private var undoManager
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let isNote = annotation.kind == .note
+        VStack(spacing: 0) {
+            InspectorHeader(title: isNote ? "Note" : "Area",
+                            subtitle: isNote ? "Text on the canvas" : "Outlines a zone, VLAN or site") {
+                Image(systemName: isNote ? "note.text" : "rectangle.dashed")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(Theme.Palette.textSecondary)
+            } trailing: { EmptyView() }
+            PanelDivider(axis: .horizontal)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                    InspectorSection(isNote ? "Text" : "Label") {
+                        TextField(isNote ? "Note" : "Area name", text: $draft, axis: .vertical)
+                            .lineLimit(isNote ? 3...10 : 1...2)
+                            .textFieldStyle(.roundedBorder)
+                            .font(Theme.Font.body)
+                            .focused($focused)
+                            .onSubmit(commit)
+                            .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+                    }
+                    InspectorSection("Frame") {
+                        KeyValueRow("Position", "\(Int(annotation.x)), \(Int(annotation.y))", mono: true)
+                        KeyValueRow("Size", "\(Int(annotation.width)) × \(Int(annotation.height))", mono: true)
+                    }
+                    Button(isNote ? "Delete Note" : "Delete Area", systemImage: "trash", role: .destructive) {
+                        document.removeAnnotation(annotation.id, undoManager: undoManager)
+                    }
+                    .controlSize(.small)
+                }
+                .padding(Theme.Spacing.l)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .onAppear { draft = annotation.text }
+        .onChange(of: annotation.text) { _, text in draft = text }
+    }
+
+    private func commit() {
+        document.updateAnnotation(annotation.id, rect: annotation.rect, text: draft,
+                                  actionName: annotation.kind == .note ? "Edit Note" : "Edit Area", undoManager: undoManager)
     }
 }
 

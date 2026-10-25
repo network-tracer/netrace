@@ -3,7 +3,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DeviceKind, DocError, FORMAT_VERSION, Medium};
+use crate::{
+    Annotation, AnnotationId, AnnotationKind, DeviceKind, DocError, FORMAT_VERSION, Medium, Rect,
+    RemovedAnnotation,
+};
 
 const FORMAT_TAG: &str = "netrace";
 
@@ -76,10 +79,11 @@ pub struct RemovedDevice {
     pub index: usize,
 }
 
-/// A network topology: devices on the canvas and the cables between them.
+/// A network topology: devices on the canvas, the cables between them and
+/// annotations (notes, areas) documenting it.
 ///
-/// Device and link ids come from one shared counter and are never reused, so
-/// undo/redo can restore an item under its original id.
+/// Device, link and annotation ids come from one shared counter and are never
+/// reused, so undo/redo can restore an item under its original id.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     format: String,
@@ -87,6 +91,9 @@ pub struct Project {
     next_id: u64,
     devices: Vec<Device>,
     links: Vec<Link>,
+    /// Added after the first format release; absent in older files.
+    #[serde(default)]
+    annotations: Vec<Annotation>,
 }
 
 #[derive(Deserialize)]
@@ -109,6 +116,7 @@ impl Project {
             next_id: 1,
             devices: Vec::new(),
             links: Vec::new(),
+            annotations: Vec::new(),
         }
     }
 
@@ -140,6 +148,61 @@ impl Project {
 
     pub fn links(&self) -> &[Link] {
         &self.links
+    }
+
+    pub fn annotations(&self) -> &[Annotation] {
+        &self.annotations
+    }
+
+    pub fn add_annotation(&mut self, kind: AnnotationKind, rect: Rect, text: &str) -> &Annotation {
+        let annotation = Annotation {
+            id: AnnotationId(self.allocate_id()),
+            kind,
+            rect: Rect::new(rect.x, rect.y, rect.width, rect.height),
+            text: Annotation::clamp_text(text),
+        };
+        self.annotations.push(annotation);
+        self.annotations.last().expect("just pushed")
+    }
+
+    /// Replaces an annotation's frame and text; returns the previous version.
+    pub fn update_annotation(
+        &mut self,
+        id: AnnotationId,
+        rect: Rect,
+        text: &str,
+    ) -> Result<Annotation, DocError> {
+        let annotation = self
+            .annotations
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(DocError::UnknownAnnotation(id))?;
+        let previous = annotation.clone();
+        annotation.rect = Rect::new(rect.x, rect.y, rect.width, rect.height);
+        annotation.text = Annotation::clamp_text(text);
+        Ok(previous)
+    }
+
+    pub fn remove_annotation(&mut self, id: AnnotationId) -> Result<RemovedAnnotation, DocError> {
+        let index = self
+            .annotations
+            .iter()
+            .position(|a| a.id == id)
+            .ok_or(DocError::UnknownAnnotation(id))?;
+        Ok(RemovedAnnotation {
+            annotation: self.annotations.remove(index),
+            index,
+        })
+    }
+
+    /// Reverses [`Project::remove_annotation`].
+    pub fn restore_annotation(&mut self, removed: RemovedAnnotation) -> Result<(), DocError> {
+        let mut candidate = self.clone();
+        let index = removed.index.min(candidate.annotations.len());
+        candidate.annotations.insert(index, removed.annotation);
+        candidate.validate()?;
+        *self = candidate;
+        Ok(())
     }
 
     pub fn device(&self, id: DeviceId) -> Option<&Device> {
@@ -310,10 +373,18 @@ impl Project {
             in_use.insert(&link.b);
         }
 
+        let mut annotation_ids = HashSet::new();
+        for a in &self.annotations {
+            if !annotation_ids.insert(a.id) {
+                return Err(DocError::DuplicateAnnotation(a.id));
+            }
+        }
+
         let highest = device_ids
             .iter()
             .map(|d| d.0)
             .chain(link_ids.iter().map(|l| l.0))
+            .chain(annotation_ids.iter().map(|a| a.0))
             .max()
             .unwrap_or(0);
         if self.next_id <= highest {
@@ -422,6 +493,76 @@ mod tests {
     }
 
     #[test]
+    fn annotations_round_trip_and_share_the_id_counter() {
+        let (mut p, ..) = sample();
+        let area = p
+            .add_annotation(
+                AnnotationKind::Area,
+                Rect::new(10.0, 20.0, 300.0, 200.0),
+                "VLAN 10",
+            )
+            .id;
+        let note = p
+            .add_annotation(
+                AnnotationKind::Note,
+                Rect::new(0.0, 0.0, 1.0, f64::NAN),
+                "Lab 1",
+            )
+            .id;
+        assert!(
+            area.0 > p.links().last().unwrap().id.0,
+            "ids come from the shared counter"
+        );
+        // Sanitised: minimum size, finite values.
+        let n = p.annotations().iter().find(|a| a.id == note).unwrap();
+        assert_eq!(n.rect, Rect::new(0.0, 0.0, Rect::MIN_SIDE, Rect::MIN_SIDE));
+
+        let loaded = Project::from_json(&p.to_json()).unwrap();
+        assert_eq!(loaded, p);
+    }
+
+    #[test]
+    fn annotation_update_remove_restore() {
+        let mut p = Project::new();
+        let id = p
+            .add_annotation(AnnotationKind::Note, Rect::new(0.0, 0.0, 100.0, 50.0), "a")
+            .id;
+        let previous = p
+            .update_annotation(id, Rect::new(5.0, 5.0, 120.0, 60.0), "b")
+            .unwrap();
+        assert_eq!(previous.text, "a");
+        assert_eq!(p.annotations()[0].text, "b");
+
+        let removed = p.remove_annotation(id).unwrap();
+        assert!(p.annotations().is_empty());
+        p.restore_annotation(removed.clone()).unwrap();
+        assert_eq!(p.annotations()[0].text, "b");
+        assert!(matches!(
+            p.restore_annotation(removed),
+            Err(DocError::DuplicateAnnotation(_))
+        ));
+        assert!(matches!(
+            p.remove_annotation(AnnotationId(999)),
+            Err(DocError::UnknownAnnotation(_))
+        ));
+    }
+
+    #[test]
+    fn annotation_text_is_clamped() {
+        let mut p = Project::new();
+        let long = "é".repeat(Annotation::MAX_TEXT + 10);
+        let a = p.add_annotation(AnnotationKind::Note, Rect::new(0.0, 0.0, 50.0, 50.0), &long);
+        assert_eq!(a.text.chars().count(), Annotation::MAX_TEXT);
+    }
+
+    #[test]
+    fn files_without_annotations_still_load() {
+        let old =
+            br#"{ "format": "netrace", "version": 1, "next_id": 1, "devices": [], "links": [] }"#;
+        assert!(Project::from_json(old).unwrap().annotations().is_empty());
+    }
+
+    #[test]
     fn ids_are_never_reused() {
         let mut p = Project::new();
         let a = p.add_device(DeviceKind::Pc, Point::default()).id;
@@ -451,7 +592,8 @@ mod tests {
                 "devices": [
                     { "id": 1, "kind": "l3_switch", "name": "MLS1", "position": { "x": 1.5, "y": -2.0 } }
                 ],
-                "links": []
+                "links": [],
+                "annotations": []
             })
         );
     }

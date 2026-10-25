@@ -15,9 +15,14 @@ struct SidebarPanel: View {
             .padding(.horizontal, Theme.Spacing.m)
             PanelDivider(axis: .horizontal)
 
-            SearchField(prompt: workspace.sidebarTab == .library ? "Search devices" : "Filter topology",
-                        text: $workspace.librarySearch)
-                .padding(Theme.Spacing.m)
+            Group {
+                if workspace.sidebarTab == .library {
+                    SearchField(prompt: "Search devices", text: $workspace.librarySearch)
+                } else {
+                    SearchField(prompt: "Filter topology", text: $workspace.topologySearch)
+                }
+            }
+            .padding(Theme.Spacing.m)
 
             switch workspace.sidebarTab {
             case .library: LibraryView(document: document, workspace: workspace)
@@ -86,24 +91,11 @@ private struct LibraryView: View {
         }
     }
 
+    /// Adds the device in view: at the canvas centre, or the nearest free spot.
     private func add(_ kind: DeviceKind) {
-        let device = document.addDevice(kind, at: freeSpot(), undoManager: undoManager)
+        let point = Placement.freeSpot(near: workspace.viewportCenter, avoiding: document.state.devices.map(\.position))
+        let device = document.addDevice(kind, at: point, undoManager: undoManager)
         workspace.selectDevices([device.id])
-    }
-
-    /// First grid position, scanning rows from the top-left, clear of other devices.
-    private func freeSpot() -> CGPoint {
-        let step = Theme.Size.gridSpacing * 5
-        let taken = document.state.devices.map(\.position)
-        for row in 1...40 {
-            for column in 1...8 {
-                let candidate = CGPoint(x: CGFloat(column) * step, y: CGFloat(row) * step)
-                if taken.allSatisfy({ hypot($0.x - candidate.x, $0.y - candidate.y) >= step * 0.8 }) {
-                    return candidate
-                }
-            }
-        }
-        return CGPoint(x: step, y: step)
     }
 }
 
@@ -181,9 +173,9 @@ private struct TopologyOutline: View {
     @ObservedObject var workspace: WorkspaceModel
 
     var body: some View {
+        let query = workspace.topologySearch
         let devices = document.state.devices.filter {
-            workspace.librarySearch.isEmpty || $0.name.localizedCaseInsensitiveContains(workspace.librarySearch)
-                || $0.kind.matches(workspace.librarySearch)
+            query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || $0.kind.matches(query)
         }
         if document.state.devices.isEmpty {
             EmptyState(glyph: .custom(.topology), title: "No devices yet",
@@ -207,7 +199,7 @@ private struct TopologyOutline: View {
                         }
                     }
 
-                    if !document.state.links.isEmpty && workspace.librarySearch.isEmpty {
+                    if !document.state.links.isEmpty && query.isEmpty {
                         VStack(alignment: .leading, spacing: 1) {
                             SectionHeader("Cables") {
                                 Text("\(document.state.links.count)").font(Theme.Font.caption).foregroundStyle(Theme.Palette.textTertiary)

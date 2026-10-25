@@ -5,6 +5,11 @@ import Foundation
 
 extension DeviceInfo: Identifiable {}
 extension LinkInfo: Identifiable {}
+extension AnnotationInfo: Identifiable {}
+
+extension AnnotationInfo {
+    var rect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+}
 
 extension DeviceInfo {
     var position: CGPoint { CGPoint(x: x, y: y) }

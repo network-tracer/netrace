@@ -177,6 +177,74 @@ extension ProjectDocument {
         }
     }
 
+    // MARK: Annotations
+
+    func annotation(_ id: UInt64) -> AnnotationInfo? {
+        state.annotations.first { $0.id == id }
+    }
+
+    @discardableResult
+    func addAnnotation(_ kind: AnnotationKind, in rect: CGRect, text: String, undoManager: UndoManager?) -> AnnotationInfo {
+        let annotation = project.addAnnotation(kind: kind, x: rect.minX, y: rect.minY,
+                                               width: rect.width, height: rect.height, text: text)
+        refresh()
+        registerUndo(undoManager, name: kind == .note ? "Add Note" : "Add Area") { doc, undo in
+            doc.removeAnnotation(annotation.id, undoManager: undo)
+        }
+        return annotation
+    }
+
+    func updateAnnotation(_ id: UInt64, rect: CGRect, text: String, actionName: String, undoManager: UndoManager?) {
+        guard let current = annotation(id),
+              current.rect != rect || current.text != text,
+              let previous = try? project.updateAnnotation(id: id, x: rect.minX, y: rect.minY,
+                                                           width: rect.width, height: rect.height, text: text)
+        else { return }
+        refresh()
+        registerUndo(undoManager, name: actionName) { doc, undo in
+            doc.updateAnnotation(id, rect: previous.rect, text: previous.text, actionName: actionName, undoManager: undo)
+        }
+    }
+
+    func removeAnnotation(_ id: UInt64, undoManager: UndoManager?) {
+        guard let removed = try? project.removeAnnotation(id: id) else { return }
+        refresh()
+        registerUndo(undoManager, name: removed.annotation.kind == .note ? "Delete Note" : "Delete Area") { doc, undo in
+            doc.restoreAnnotation(removed, undoManager: undo)
+        }
+    }
+
+    private func restoreAnnotation(_ removed: RemovedAnnotationInfo, undoManager: UndoManager?) {
+        guard (try? project.restoreAnnotation(removed: removed)) != nil else { return }
+        refresh()
+        registerUndo(undoManager, name: "Restore") { doc, undo in
+            doc.removeAnnotation(removed.annotation.id, undoManager: undo)
+        }
+    }
+
+    // MARK: Copy and paste
+
+    /// Adds the clipboard's devices around `center`, recreating the cables
+    /// between them on the same ports. One undo step; returns the new ids.
+    @discardableResult
+    func paste(_ clipboard: TopologyClipboard, centeredAt center: CGPoint, actionName: String,
+               undoManager: UndoManager?) -> [UInt64] {
+        var ids: [UInt64] = []
+        for item in clipboard.devices {
+            guard let kind = DeviceKind(dragIdentifier: item.kind) else { continue }
+            let point = CGPoint(x: center.x + item.dx, y: center.y + item.dy).snapped
+            ids.append(addDevice(kind, at: point, undoManager: undoManager).id)
+        }
+        for link in clipboard.links where ids.indices.contains(link.a) && ids.indices.contains(link.b) {
+            _ = connect(ids[link.a], ids[link.b], portA: link.portA, portB: link.portB,
+                        medium: link.fiber ? .fiber : .copper, undoManager: undoManager)
+        }
+        if let undoManager, !undoManager.isUndoing, !undoManager.isRedoing, !ids.isEmpty {
+            undoManager.setActionName(actionName)
+        }
+        return ids
+    }
+
     private func refresh() {
         state = project.snapshot()
     }

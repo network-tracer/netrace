@@ -123,7 +123,8 @@ struct CommandPalette: View {
         var list: [Command] = DeviceKind.allCases.map { kind in
             Command(id: "add.\(kind)", title: "Add \(kind.displayName)", group: "Devices",
                     glyph: kind.category == .network ? .custom(.topology) : .system("desktopcomputer")) {
-                let device = document.addDevice(kind, at: CGPoint(x: 240, y: 200).snapped, undoManager: undoManager)
+                let point = Placement.freeSpot(near: ws.viewportCenter, avoiding: document.state.devices.map(\.position))
+                let device = document.addDevice(kind, at: point, undoManager: undoManager)
                 ws.selectDevices([device.id])
             }
         }
