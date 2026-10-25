@@ -163,6 +163,23 @@ impl Project {
         Ok(())
     }
 
+    /// Renames a device. Names follow IOS hostname rules (1–63 characters,
+    /// letters, digits and hyphens, starting with a letter and not ending in a
+    /// hyphen) and are unique ignoring case. Returns the previous name.
+    pub fn rename_device(&mut self, id: DeviceId, name: &str) -> Result<String, DocError> {
+        let name = name.trim();
+        validate_hostname(name)?;
+        let taken = self
+            .devices
+            .iter()
+            .any(|d| d.id != id && d.name.eq_ignore_ascii_case(name));
+        if taken {
+            return Err(DocError::DuplicateName(name.to_string()));
+        }
+        let device = self.device_mut(id)?;
+        Ok(std::mem::replace(&mut device.name, name.to_string()))
+    }
+
     /// Removes a device and every link attached to it.
     pub fn remove_device(&mut self, id: DeviceId) -> Result<RemovedDevice, DocError> {
         let index = self
@@ -309,6 +326,26 @@ impl Project {
     }
 }
 
+fn validate_hostname(name: &str) -> Result<(), DocError> {
+    let invalid = |reason| Err(DocError::InvalidName(name.to_string(), reason));
+    if name.is_empty() {
+        return invalid("it is empty");
+    }
+    if name.len() > 63 {
+        return invalid("it is longer than 63 characters");
+    }
+    if !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return invalid("it must start with a letter");
+    }
+    if name.ends_with('-') {
+        return invalid("it must not end with a hyphen");
+    }
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return invalid("use only letters, digits and hyphens");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +395,30 @@ mod tests {
             p.add_device(DeviceKind::Router, Point::default()).name,
             "R1"
         );
+    }
+
+    #[test]
+    fn rename_follows_hostname_rules() {
+        let (mut p, r1, sw1, _) = sample();
+        assert_eq!(p.rename_device(r1, "  Core-1 ").unwrap(), "R1");
+        assert_eq!(p.device(r1).unwrap().name, "Core-1");
+
+        for bad in ["", "1R", "R 1", "R1-", "R_1", &"x".repeat(64)] {
+            assert!(
+                matches!(p.rename_device(sw1, bad), Err(DocError::InvalidName(..))),
+                "{bad:?} should be rejected"
+            );
+        }
+        assert!(matches!(
+            p.rename_device(sw1, "core-1"),
+            Err(DocError::DuplicateName(_))
+        ));
+        // Renaming to its own name (any case) is allowed.
+        assert!(p.rename_device(r1, "CORE-1").is_ok());
+        assert!(matches!(
+            p.rename_device(DeviceId(999), "X"),
+            Err(DocError::UnknownDevice(_))
+        ));
     }
 
     #[test]
@@ -495,11 +556,15 @@ mod tests {
     }
 
     #[test]
-    fn bundled_example_loads() {
-        let bytes = include_bytes!("../../../examples/starter.netrace/project.json");
-        let p = Project::from_json(bytes).unwrap();
-        assert_eq!(p.devices().len(), 3);
-        assert_eq!(p.links().len(), 2);
+    fn bundled_examples_load() {
+        // Samples are meant to be edited in the app, so only check they stay valid.
+        for bytes in [
+            &include_bytes!("../../../examples/starter.netrace/project.json")[..],
+            &include_bytes!("../../../examples/campus.netrace/project.json")[..],
+        ] {
+            let p = Project::from_json(bytes).unwrap();
+            assert!(!p.devices().is_empty());
+        }
     }
 
     #[test]

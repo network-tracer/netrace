@@ -1,25 +1,42 @@
 import AppKit
 import SwiftUI
 
-/// netrace design tokens. Views use these instead of literal colours and
-/// sizes so light/dark themes and future restyling stay in one place.
-/// Surfaces are opaque on purpose: no vibrancy, materials or Liquid Glass.
+/// netrace design tokens (see DESIGN.md). Views use these instead of literal
+/// colours, sizes and fonts so light/dark themes stay in one place.
+/// The interface is monotone: colour only carries meaning (accent, status,
+/// protocol). Surfaces are opaque: no vibrancy, materials or Liquid Glass.
 enum Theme {
     enum Palette {
-        static let canvas = Color(light: 0xF6F7F9, dark: 0x15171B)
-        static let canvasGrid = Color(light: 0xD5D9E0, dark: 0x2A2E35)
-        static let surface = Color(light: 0xFFFFFF, dark: 0x1D2025)
-        static let surfaceSunken = Color(light: 0xF0F2F5, dark: 0x191B1F)
-        static let border = Color(light: 0xE2E5EA, dark: 0x2C3037)
-        static let textPrimary = Color(light: 0x171A1F, dark: 0xE9ECF1)
-        static let textSecondary = Color(light: 0x5F6773, dark: 0x9AA2AE)
-        static let textTertiary = Color(light: 0x8C93A0, dark: 0x6B7380)
-        static let accent = Color(light: 0x2F6BFF, dark: 0x5B8CFF)
-        static let link = Color(light: 0x7A8494, dark: 0x5E6775)
-        static let linkUp = Color(light: 0x1F9D55, dark: 0x34C072)
+        static let canvas = Color(light: 0xF5F5F5, dark: 0x161616)
+        static let canvasGrid = Color(light: 0xD9D9D9, dark: 0x2B2B2B)
+        static let surface = Color(light: 0xFFFFFF, dark: 0x1E1E1E)
+        static let surfaceRaised = Color(light: 0xFAFAFA, dark: 0x242424)
+        static let surfaceSunken = Color(light: 0xF4F4F4, dark: 0x191919)
+        static let hover = Color(light: 0xF0F0F0, dark: 0x2A2A2A)
+        static let border = Color(light: 0xE5E5E5, dark: 0x2E2E2E)
+        static let borderStrong = Color(light: 0xD4D4D4, dark: 0x3A3A3A)
+
+        static let textPrimary = Color(light: 0x171717, dark: 0xEDEDED)
+        static let textSecondary = Color(light: 0x5C5C5C, dark: 0xA3A3A3)
+        /// ≥ 4.8:1 on every surface in both modes (UX-ANALYSIS.md).
+        static let textTertiary = Color(light: 0x6B6B6B, dark: 0x8F8F8F)
+
+        static let symbolFill = Color(light: 0xFFFFFF, dark: 0x262626)
+        static let symbolStroke = Color(light: 0x262626, dark: 0xE0E0E0)
+        /// ≥ 3:1 against the canvas, as a meaningful graphic.
+        static let link = Color(light: 0x7A7A7A, dark: 0x7A7A7A)
+
+        /// Follows System Settings → Appearance → Accent colour.
+        static let accent = Color.accentColor
+        static let onAccent = Color.white
+
+        static let statusUp = Color(light: 0x2F9E5B, dark: 0x3DB46D)
+        static let statusWarning = Color(light: 0xA87300, dark: 0xE5A50A)
+        static let statusDown = Color(light: 0xD93F3F, dark: 0xEF5350)
     }
 
     enum Spacing {
+        static let xxs: CGFloat = 2
         static let xs: CGFloat = 4
         static let s: CGFloat = 8
         static let m: CGFloat = 12
@@ -28,24 +45,68 @@ enum Theme {
     }
 
     enum Radius {
-        static let s: CGFloat = 6
-        static let m: CGFloat = 10
+        static let s: CGFloat = 5
+        static let m: CGFloat = 8
+        static let l: CGFloat = 12
     }
 
     enum Size {
-        static let sidebarWidth: CGFloat = 232
-        static let inspectorWidth: CGFloat = 272
+        static let sidebarWidth: CGFloat = 248
+        static let inspectorWidth: CGFloat = 292
         static let statusBarHeight: CGFloat = 26
-        static let deviceTile: CGFloat = 56
+        static let bottomPanelDefault: CGFloat = 220
         static let gridSpacing: CGFloat = 24
+        static let iconSmall: CGFloat = 14
+        static let icon: CGFloat = 16
+        static let rowHeight: CGFloat = 26
     }
 
+    /// SF Pro (the system font) for interface text, SF Mono for interface
+    /// names, addresses, CLI and packet fields.
     enum Font {
-        static let sectionHeader = SwiftUI.Font.system(size: 11, weight: .semibold)
+        static let title = SwiftUI.Font.system(size: 17, weight: .semibold)
+        static let headline = SwiftUI.Font.system(size: 13, weight: .semibold)
+        static let emptyTitle = SwiftUI.Font.system(size: 15, weight: .semibold)
         static let body = SwiftUI.Font.system(size: 13)
         static let label = SwiftUI.Font.system(size: 12, weight: .medium)
+        static let labelSemibold = SwiftUI.Font.system(size: 12, weight: .semibold)
         static let caption = SwiftUI.Font.system(size: 11)
-        static let mono = SwiftUI.Font.system(size: 12, design: .monospaced)
+        static let captionMedium = SwiftUI.Font.system(size: 11, weight: .medium)
+        /// Small uppercase section headers.
+        static let sectionHeader = SwiftUI.Font.system(size: 10.5, weight: .semibold)
+        static let sectionHeaderTracking: CGFloat = 0.5
+        static let mono = SwiftUI.Font.system(size: 11.5, design: .monospaced)
+        static let monoSmall = SwiftUI.Font.system(size: 10.5, design: .monospaced)
+    }
+}
+
+/// Protocol identity colours, used only in simulation views (events,
+/// capture, packets on the canvas).
+enum NetProtocol: String, CaseIterable, Identifiable {
+    case arp = "ARP"
+    case icmp = "ICMP"
+    case dhcp = "DHCP"
+    case ospf = "OSPF"
+    case stp = "STP"
+    case cdp = "CDP"
+    case tcp = "TCP"
+    case udp = "UDP"
+    case dns = "DNS"
+
+    var id: Self { self }
+
+    var color: Color {
+        switch self {
+        case .arp: Color(light: 0xD4930D, dark: 0xF0B429)
+        case .icmp: Color(light: 0x1F8FCC, dark: 0x4CB3EB)
+        case .dhcp: Color(light: 0x2F9E5B, dark: 0x3DB46D)
+        case .ospf: Color(light: 0x7C5CD6, dark: 0x9D85F0)
+        case .stp: Color(light: 0x5B6B7F, dark: 0x8696AA)
+        case .cdp: Color(light: 0x7A7A7A, dark: 0x9A9A9A)
+        case .tcp: Color(light: 0x2F6FDB, dark: 0x5B93F0)
+        case .udp: Color(light: 0x14958A, dark: 0x2DBFB2)
+        case .dns: Color(light: 0xC2417A, dark: 0xE06A9E)
+        }
     }
 }
 
@@ -67,48 +128,5 @@ private extension NSColor {
             blue: CGFloat(rgb & 0xFF) / 255,
             alpha: 1
         )
-    }
-}
-
-extension DeviceKind {
-    var displayName: String {
-        switch self {
-        case .router: "Router"
-        case .l2Switch: "Switch"
-        case .l3Switch: "Layer 3 Switch"
-        case .pc: "PC"
-        case .server: "Server"
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .router: "4 × Gigabit Ethernet"
-        case .l2Switch: "24 × Fast Ethernet, 2 × Gigabit"
-        case .l3Switch: "24 × Gigabit, routing"
-        case .pc: "1 × Fast Ethernet"
-        case .server: "1 × Gigabit, services"
-        }
-    }
-
-    /// Placeholder SF Symbols until the in-house device icon set exists.
-    var symbol: String {
-        switch self {
-        case .router: "arrow.triangle.branch"
-        case .l2Switch: "square.split.2x1"
-        case .l3Switch: "square.stack.3d.up"
-        case .pc: "desktopcomputer"
-        case .server: "server.rack"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .router: Color(light: 0x2F6BFF, dark: 0x5B8CFF)
-        case .l2Switch: Color(light: 0x0E9384, dark: 0x2EC4B0)
-        case .l3Switch: Color(light: 0x7A5AF8, dark: 0x9B85FF)
-        case .pc: Color(light: 0x475467, dark: 0x98A2B3)
-        case .server: Color(light: 0xDC6803, dark: 0xF79009)
-        }
     }
 }

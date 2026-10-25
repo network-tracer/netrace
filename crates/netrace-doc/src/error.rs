@@ -34,6 +34,12 @@ pub enum DocError {
     #[error("a link cannot connect a port to itself")]
     SelfLoop,
 
+    #[error("\"{0}\" is not a valid hostname: {1}")]
+    InvalidName(String, &'static str),
+
+    #[error("another device is already named \"{0}\"")]
+    DuplicateName(String),
+
     #[error("next_id {next_id} is not above the highest id in use ({highest})")]
     StaleIdCounter { next_id: u64, highest: u64 },
 }

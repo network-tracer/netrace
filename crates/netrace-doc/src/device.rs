@@ -3,20 +3,40 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceKind {
+    // Network devices
     Router,
     L2Switch,
     L3Switch,
+    Hub,
+    Firewall,
+    AccessPoint,
+    /// An ISP / internet attachment point.
+    Cloud,
+    // End devices
     Pc,
+    Laptop,
     Server,
+    Printer,
+    IpPhone,
+    /// Wireless only, so it has no wired ports.
+    Smartphone,
 }
 
 impl DeviceKind {
-    pub const ALL: [DeviceKind; 5] = [
+    pub const ALL: [DeviceKind; 13] = [
         DeviceKind::Router,
         DeviceKind::L2Switch,
         DeviceKind::L3Switch,
+        DeviceKind::Hub,
+        DeviceKind::Firewall,
+        DeviceKind::AccessPoint,
+        DeviceKind::Cloud,
         DeviceKind::Pc,
+        DeviceKind::Laptop,
         DeviceKind::Server,
+        DeviceKind::Printer,
+        DeviceKind::IpPhone,
+        DeviceKind::Smartphone,
     ];
 
     /// Prefix for auto-generated hostnames, following CCNA lab conventions (R1, SW1, …).
@@ -25,8 +45,16 @@ impl DeviceKind {
             DeviceKind::Router => "R",
             DeviceKind::L2Switch => "SW",
             DeviceKind::L3Switch => "MLS",
+            DeviceKind::Hub => "HUB",
+            DeviceKind::Firewall => "FW",
+            DeviceKind::AccessPoint => "AP",
+            DeviceKind::Cloud => "ISP",
             DeviceKind::Pc => "PC",
+            DeviceKind::Laptop => "LAPTOP",
             DeviceKind::Server => "SRV",
+            DeviceKind::Printer => "PRN",
+            DeviceKind::IpPhone => "PHONE",
+            DeviceKind::Smartphone => "MOBILE",
         }
     }
 
@@ -41,8 +69,17 @@ impl DeviceKind {
             DeviceKind::L3Switch => (1..=24)
                 .map(|n| format!("GigabitEthernet1/0/{n}"))
                 .collect(),
-            DeviceKind::Pc => vec!["FastEthernet0".into()],
+            DeviceKind::Hub => (1..=8).map(|n| format!("Port{n}")).collect(),
+            DeviceKind::Firewall => (1..=8).map(|n| format!("GigabitEthernet1/{n}")).collect(),
+            DeviceKind::AccessPoint => vec!["GigabitEthernet0".into()],
+            DeviceKind::Cloud => (0..4).map(|n| format!("Ethernet{n}")).collect(),
+            DeviceKind::Pc | DeviceKind::Laptop | DeviceKind::Printer => {
+                vec!["FastEthernet0".into()]
+            }
             DeviceKind::Server => vec!["GigabitEthernet0".into()],
+            // Cisco-style phones: uplink to the switch, pass-through to a PC.
+            DeviceKind::IpPhone => vec!["Switch".into(), "PC".into()],
+            DeviceKind::Smartphone => Vec::new(),
         }
     }
 
@@ -72,6 +109,19 @@ mod tests {
         assert_eq!(DeviceKind::L3Switch.port_names().len(), 24);
         assert_eq!(DeviceKind::Pc.port_names(), ["FastEthernet0"]);
         assert_eq!(DeviceKind::Server.port_names(), ["GigabitEthernet0"]);
+        assert_eq!(DeviceKind::Hub.port_names().len(), 8);
+        assert_eq!(DeviceKind::Firewall.port_names().len(), 8);
+        assert_eq!(DeviceKind::Cloud.port_names().len(), 4);
+        assert_eq!(DeviceKind::IpPhone.port_names(), ["Switch", "PC"]);
+        assert!(DeviceKind::Smartphone.port_names().is_empty());
+    }
+
+    #[test]
+    fn name_prefixes_are_unique() {
+        let mut prefixes: Vec<_> = DeviceKind::ALL.iter().map(|k| k.name_prefix()).collect();
+        prefixes.sort_unstable();
+        prefixes.dedup();
+        assert_eq!(prefixes.len(), DeviceKind::ALL.len());
     }
 
     #[test]

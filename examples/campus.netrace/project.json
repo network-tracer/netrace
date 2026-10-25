@@ -1,0 +1,279 @@
+{
+  "format": "netrace",
+  "version": 1,
+  "next_id": 27,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "cloud",
+      "name": "ISP1",
+      "position": {
+        "x": 600.0,
+        "y": 96.0
+      }
+    },
+    {
+      "id": 2,
+      "kind": "firewall",
+      "name": "FW1",
+      "position": {
+        "x": 600.0,
+        "y": 216.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 600.0,
+        "y": 336.0
+      }
+    },
+    {
+      "id": 4,
+      "kind": "l3_switch",
+      "name": "MLS1",
+      "position": {
+        "x": 600.0,
+        "y": 456.0
+      }
+    },
+    {
+      "id": 5,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 360.0,
+        "y": 600.0
+      }
+    },
+    {
+      "id": 6,
+      "kind": "l2_switch",
+      "name": "SW2",
+      "position": {
+        "x": 840.0,
+        "y": 600.0
+      }
+    },
+    {
+      "id": 7,
+      "kind": "access_point",
+      "name": "AP1",
+      "position": {
+        "x": 960.0,
+        "y": 456.0
+      }
+    },
+    {
+      "id": 8,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 216.0,
+        "y": 756.0
+      }
+    },
+    {
+      "id": 9,
+      "kind": "laptop",
+      "name": "LAPTOP1",
+      "position": {
+        "x": 360.0,
+        "y": 756.0
+      }
+    },
+    {
+      "id": 10,
+      "kind": "ip_phone",
+      "name": "PHONE1",
+      "position": {
+        "x": 504.0,
+        "y": 756.0
+      }
+    },
+    {
+      "id": 11,
+      "kind": "server",
+      "name": "SRV1",
+      "position": {
+        "x": 720.0,
+        "y": 756.0
+      }
+    },
+    {
+      "id": 12,
+      "kind": "printer",
+      "name": "PRN1",
+      "position": {
+        "x": 864.0,
+        "y": 756.0
+      }
+    },
+    {
+      "id": 13,
+      "kind": "hub",
+      "name": "HUB1",
+      "position": {
+        "x": 1008.0,
+        "y": 756.0
+      }
+    },
+    {
+      "id": 14,
+      "kind": "smartphone",
+      "name": "MOBILE1",
+      "position": {
+        "x": 1104.0,
+        "y": 456.0
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 15,
+      "a": {
+        "device": 1,
+        "port": "Ethernet0"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet1/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 16,
+      "a": {
+        "device": 2,
+        "port": "GigabitEthernet1/2"
+      },
+      "b": {
+        "device": 3,
+        "port": "GigabitEthernet0/0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 17,
+      "a": {
+        "device": 3,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 18,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/2"
+      },
+      "b": {
+        "device": 5,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "fiber"
+    },
+    {
+      "id": 19,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/3"
+      },
+      "b": {
+        "device": 6,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "fiber"
+    },
+    {
+      "id": 20,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/4"
+      },
+      "b": {
+        "device": 7,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 21,
+      "a": {
+        "device": 5,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 8,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 22,
+      "a": {
+        "device": 5,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 9,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 23,
+      "a": {
+        "device": 5,
+        "port": "FastEthernet0/3"
+      },
+      "b": {
+        "device": 10,
+        "port": "Switch"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 24,
+      "a": {
+        "device": 6,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 11,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 25,
+      "a": {
+        "device": 6,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 12,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 26,
+      "a": {
+        "device": 6,
+        "port": "FastEthernet0/3"
+      },
+      "b": {
+        "device": 13,
+        "port": "Port1"
+      },
+      "medium": "copper"
+    }
+  ]
+}

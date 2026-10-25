@@ -102,6 +102,81 @@ extension ProjectDocument {
         }
     }
 
+    func link(_ id: UInt64) -> LinkInfo? {
+        state.links.first { $0.id == id }
+    }
+
+    func freePorts(of id: UInt64) -> [String] {
+        guard let device = device(id) else { return [] }
+        let used = Set(links(attachedTo: id).compactMap { $0.endpoint(for: id)?.port })
+        return device.kind.ports.filter { !used.contains($0) }
+    }
+
+    /// Cables two devices. Ports default to the first free port on each.
+    func connect(_ a: UInt64, _ b: UInt64, portA: String? = nil, portB: String? = nil,
+                 medium: Medium, undoManager: UndoManager?) -> Result<LinkInfo, CoreError> {
+        guard a != b, let devA = device(a), let devB = device(b) else {
+            return .failure(.InvalidOperation(message: "Choose two different devices."))
+        }
+        guard let portA = portA ?? freePorts(of: a).first else {
+            return .failure(.InvalidOperation(message: "\(devA.name) has no free ports."))
+        }
+        guard let portB = portB ?? freePorts(of: b).first else {
+            return .failure(.InvalidOperation(message: "\(devB.name) has no free ports."))
+        }
+        do {
+            let link = try project.connect(
+                a: EndpointInfo(deviceId: a, port: portA),
+                b: EndpointInfo(deviceId: b, port: portB),
+                medium: medium
+            )
+            refresh()
+            registerUndo(undoManager, name: "Connect \(devA.name) to \(devB.name)") { doc, undo in
+                doc.disconnect(link.id, undoManager: undo)
+            }
+            return .success(link)
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
+    /// Renames a device (IOS hostname rules, unique ignoring case).
+    @discardableResult
+    func renameDevice(_ id: UInt64, to name: String, undoManager: UndoManager?) -> Result<Void, CoreError> {
+        do {
+            let previous = try project.renameDevice(id: id, name: name)
+            // The core trims whitespace; an unchanged name needs no undo step.
+            guard previous != name.trimmingCharacters(in: .whitespaces) else { return .success(()) }
+            refresh()
+            registerUndo(undoManager, name: "Rename \(previous)") { doc, undo in
+                doc.renameDevice(id, to: previous, undoManager: undo)
+            }
+            return .success(())
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
+    func disconnect(_ id: UInt64, undoManager: UndoManager?) {
+        guard let link = try? project.disconnect(linkId: id) else { return }
+        refresh()
+        registerUndo(undoManager, name: "Delete Cable") { doc, undo in
+            doc.restoreLink(link, undoManager: undo)
+        }
+    }
+
+    private func restoreLink(_ link: LinkInfo, undoManager: UndoManager?) {
+        guard (try? project.restoreLink(link: link)) != nil else { return }
+        refresh()
+        registerUndo(undoManager, name: "Restore Cable") { doc, undo in
+            doc.disconnect(link.id, undoManager: undo)
+        }
+    }
+
     private func refresh() {
         state = project.snapshot()
     }

@@ -49,8 +49,16 @@ pub enum DeviceKind {
     Router,
     L2Switch,
     L3Switch,
+    Hub,
+    Firewall,
+    AccessPoint,
+    Cloud,
     Pc,
+    Laptop,
     Server,
+    Printer,
+    IpPhone,
+    Smartphone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -143,6 +151,13 @@ impl Project {
             .map_err(invalid_operation)
     }
 
+    /// Renames a device; returns the previous name (for undo).
+    pub fn rename_device(&self, id: u64, name: String) -> Result<String, CoreError> {
+        self.lock()
+            .rename_device(doc::DeviceId(id), &name)
+            .map_err(invalid_operation)
+    }
+
     pub fn remove_device(&self, id: u64) -> Result<RemovedDeviceInfo, CoreError> {
         let removed = self
             .lock()
@@ -210,8 +225,16 @@ impl From<DeviceKind> for doc::DeviceKind {
             DeviceKind::Router => doc::DeviceKind::Router,
             DeviceKind::L2Switch => doc::DeviceKind::L2Switch,
             DeviceKind::L3Switch => doc::DeviceKind::L3Switch,
+            DeviceKind::Hub => doc::DeviceKind::Hub,
+            DeviceKind::Firewall => doc::DeviceKind::Firewall,
+            DeviceKind::AccessPoint => doc::DeviceKind::AccessPoint,
+            DeviceKind::Cloud => doc::DeviceKind::Cloud,
             DeviceKind::Pc => doc::DeviceKind::Pc,
+            DeviceKind::Laptop => doc::DeviceKind::Laptop,
             DeviceKind::Server => doc::DeviceKind::Server,
+            DeviceKind::Printer => doc::DeviceKind::Printer,
+            DeviceKind::IpPhone => doc::DeviceKind::IpPhone,
+            DeviceKind::Smartphone => doc::DeviceKind::Smartphone,
         }
     }
 }
@@ -222,8 +245,16 @@ impl From<doc::DeviceKind> for DeviceKind {
             doc::DeviceKind::Router => DeviceKind::Router,
             doc::DeviceKind::L2Switch => DeviceKind::L2Switch,
             doc::DeviceKind::L3Switch => DeviceKind::L3Switch,
+            doc::DeviceKind::Hub => DeviceKind::Hub,
+            doc::DeviceKind::Firewall => DeviceKind::Firewall,
+            doc::DeviceKind::AccessPoint => DeviceKind::AccessPoint,
+            doc::DeviceKind::Cloud => DeviceKind::Cloud,
             doc::DeviceKind::Pc => DeviceKind::Pc,
+            doc::DeviceKind::Laptop => DeviceKind::Laptop,
             doc::DeviceKind::Server => DeviceKind::Server,
+            doc::DeviceKind::Printer => DeviceKind::Printer,
+            doc::DeviceKind::IpPhone => DeviceKind::IpPhone,
+            doc::DeviceKind::Smartphone => DeviceKind::Smartphone,
         }
     }
 }

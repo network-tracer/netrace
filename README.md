@@ -1,7 +1,8 @@
 # netrace
 
 A native macOS network simulator for CCNA students. Rust simulation core,
-SwiftUI/AppKit app. See [SCOPE.md](SCOPE.md) for the v1.0 plan.
+SwiftUI/AppKit app. See [SCOPE.md](SCOPE.md) for the v1.0 plan and
+[DESIGN.md](DESIGN.md) for the interface direction.
 
 ## Requirements
 
@@ -18,7 +19,8 @@ make test    # Rust tests
 make lint    # rustfmt + clippy
 ```
 
-Open `examples/starter.netrace` for a small sample topology.
+Open `examples/starter.netrace` for a small sample topology, or
+`examples/campus.netrace` for one that uses every device kind.
 
 After changing anything in `crates/`, run `make core` before building in Xcode:
 the app links the static library and Swift bindings that step produces.
@@ -33,8 +35,15 @@ crates/
 app/
   project.yml    XcodeGen spec (the .xcodeproj is generated, not committed)
   Netrace/       SwiftUI app: document, canvas, library, inspector, design tokens
+  Netrace/Design/          tokens (Theme), device symbols, device catalog, icons, appearance
+  Netrace/Workspace/       per-window interface state; preview data for unbuilt panels
+  Netrace/Views/           Window (toolbar, menus, ⌘K), Sidebar, Canvas, Inspector, BottomPanel
+  Netrace/Assets.xcassets/ Icons/*.imageset (SVG source of each icon), AppIcon
+design/
+  app-icon.svg   app icon source
 scripts/
-  build-core.sh  Rust → NetraceCore.xcframework + Generated/netrace_ffi.swift
+  build-core.sh        Rust → NetraceCore.xcframework + Generated/netrace_ffi.swift
+  render-app-icon.sh   design/app-icon.svg → AppIcon.appiconset (needs librsvg)
 examples/        sample projects
 ```
 

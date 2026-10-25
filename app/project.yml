@@ -33,7 +33,7 @@ targets:
         # Turn on ENABLE_HARDENED_RUNTIME together with real signing.
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
       path: Support/Netrace.entitlements
       properties:
