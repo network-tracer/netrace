@@ -227,7 +227,14 @@ fn the_tour_network_shows_every_feature_working() {
             .unwrap()
             .contains(&format!("Reply from {to}"))
     };
-    // PAT through the firewall: a ping and a web request to the internet.
+    // PAT through the firewall: a web request across three cold ARP caches
+    // (one SYN lost at each router), then a ping and another request.
+    let cold = net
+        .connect(id("TAC-TEAM"), ip("198.51.100.10"), 80, TcpApp::Http, t)
+        .unwrap();
+    let report = net.connection_report(cold).unwrap();
+    assert!(report.contains("netrace web server"), "{report}");
+    t = t + step;
     assert!(replies(&mut net, "GPS-TRACK", "198.51.100.10", t));
     t = t + step;
     let web = net

@@ -15,10 +15,11 @@ use crate::network::{Arrival, Event};
 use crate::stack::{Iface, Stack};
 use crate::{Frame, Ipv4Packet, L4, LayerRole, Network, Outcome, Tcp, TcpFlags, abbreviate_port};
 
-/// SYNs go at 0 s, 1 s and 3 s; with no answer by 7 s the connection fails,
-/// a shortened version of what Windows does.
-const SYN_RETRIES: [u64; 2] = [1, 3];
-const GIVE_UP: Duration = Duration::from_secs(7);
+/// SYNs go at 0 s, 1 s, 3 s and 7 s, doubling as curl's on Linux; with no
+/// answer by 15 s the connection fails. Four tries are enough for a cold
+/// network where three routers each drop one SYN while ARP resolves.
+const SYN_RETRIES: [u64; 3] = [1, 3, 7];
+const GIVE_UP: Duration = Duration::from_secs(15);
 /// The first port a client picks for its side, as Windows does.
 const EPHEMERAL_BASE: u16 = 49152;
 
@@ -229,7 +230,7 @@ impl Network {
             None,
             Outcome::Dropped,
             format!(
-                "{name} gives up connecting to {} {}: none of its three SYNs got an answer.",
+                "{name} gives up connecting to {} {}: none of its four SYNs got an answer.",
                 c.destination,
                 port_text(c.dst_port)
             ),

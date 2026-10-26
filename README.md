@@ -1,34 +1,115 @@
+<div align="center">
+
 # netrace
 
-A native macOS network simulator for CCNA students. Rust simulation core,
-SwiftUI/AppKit app. See [SCOPE.md](SCOPE.md) for the v1.0 plan and
-[DESIGN.md](DESIGN.md) for the interface direction.
+**The CCNA network simulator that explains itself.**<br>
+Build a network, send a packet, and see every hop, with the reason it happened.
 
-## Requirements
+Native macOS app · Rust simulation core · No images, no VMs, no accounts
 
-- macOS 15+, Xcode 26+
-- Rust (stable) via rustup; `rustup target add x86_64-apple-darwin` for universal release builds
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
+</div>
 
-## Getting started
+<p align="center">
+  <img src="docs/screenshots/shadow-network.jpg" alt="The Shadow Network: four agency VLANs around a layer 3 core, a data centre, a firewall to the internet and a hidden SPAN VLAN" width="860">
+</p>
+
+<p align="center"><sub>The bundled <b>Shadow Network</b>: 20 devices, every feature below already configured and working.</sub></p>
+
+## Why netrace
+
+| | Packet Tracer / GNS3 | netrace |
+|---|---|---|
+| Why did my ping fail? | Read the config, guess | The trace says: *"CORE would route it out Gi1/0/24, but doesn't know FW's MAC yet, so it drops this packet and asks with ARP."* |
+| Setup | Account, images or VMs | Open the app |
+| Spanning tree, OSPF | `show` commands on every device | One live view of the whole network |
+| Checking your work | Mostly the configuration you typed | Checks the **behaviour**: "can PC1 ping PC2?" |
+| Wireshark | Separate tool | Capture any cable, export `.pcap` |
+
+## For students
+
+**Every packet explained.** Click any event and read what happened in plain English, layer by layer: ARP before ICMP, the TTL dropping at each router, the address NAT rewrote.
+
+<p align="center">
+  <img src="docs/screenshots/tour-events.jpg" alt="The event list explaining a ping from Field Ops to the internet" width="760">
+</p>
+
+**A real IOS command line.** Modes, `?` help, Tab completion, abbreviations, `show` commands, the familiar `% Invalid input` errors. PCs get `ping`, `tracert`, `ipconfig`, `curl` and `telnet`.
+
+<p align="center">
+  <img src="docs/screenshots/console.jpg" alt="CORE's console showing show ip route and show monitor" width="760">
+</p>
+
+**Protocol views, not guesswork.** See which switch is the spanning-tree root and why, which port blocks, who the OSPF DR is, and every route with the path it takes. Fail a cable and watch the network reconverge.
+
+<p align="center">
+  <img src="docs/screenshots/stp.jpg" alt="Spanning-tree view: root bridge, blocked port, path to the root" width="860">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/ospf.jpg" alt="OSPF view: neighbours, learned routes, DR election" width="860">
+</p>
+
+**VLANs you can see.** Pick a VLAN and the canvas lights up its hosts, access ports, trunks and gateway.
+
+<p align="center">
+  <img src="docs/screenshots/vlans.jpg" alt="VLAN view lighting up VLAN 30 on the canvas" width="860">
+</p>
+
+## For teachers
+
+- **20 guided CCNA labs**, from your first ping to NAT and OSPF troubleshooting. Each task checks the simulated network live and says what's still missing.
+- **Checks look at behaviour**, so any correct answer passes: pings, routes, VLANs, trunks, OSPF neighbours, STP root, DHCP leases, config lines.
+- **Lock devices** (ISP, servers) so students can read them but not break them.
+- **Write your own labs** as a small JSON section in the `.netrace` file. Format in [LABS.md](LABS.md).
+- **Reproducible**: the same network always produces the same trace, so everyone sees the same thing.
+- **Snapshots** let students try something risky and roll back.
+
+## For everyone
+
+**Built-in tour.** *Help → Take the Tour* walks through the app in 14 steps on the Shadow Network, and says what each part is called in Packet Tracer and GNS3.
+
+<p align="center">
+  <img src="docs/screenshots/tour.jpg" alt="The tour's welcome card" width="760">
+</p>
+
+## What it simulates
+
+| Area | Covered |
+|---|---|
+| Switching | VLANs, 802.1Q trunks, rapid/PVST spanning tree, port security, CDP/LLDP, SPAN mirroring |
+| Routing | Static and default routes, router-on-a-stick, layer 3 switch SVIs, OSPF (multi-area, DR/BDR, default origination) |
+| Services | DHCP (router and server, relay), standard and extended ACLs, NAT (static, pool, PAT) |
+| Transport | TCP handshake, HTTP `curl`, `telnet`, ports in ACLs and PAT |
+| Devices | Router, switch, L3 switch, hub, firewall, internet cloud, PC, laptop, server, printer, IP phone |
+| Tools | Snapshots, power on/off, link latency/jitter/loss/bandwidth, per-cable capture, `.pcap` export, undo everywhere |
+
+Command-by-command status is in [COMPATIBILITY.md](COMPATIBILITY.md). Nothing is verified against real IOS yet, and the file says so.
+
+## Try it
+
+Needs macOS 15+, Xcode 26+, [Rust](https://rustup.rs) and XcodeGen (`brew install xcodegen`).
 
 ```bash
-make run     # build the Rust core, generate the Xcode project, build and launch
-make open    # same preparation, then open app/Netrace.xcodeproj in Xcode
-make test    # Rust tests
-make lint    # rustfmt + clippy
+git clone https://github.com/network-tracer/netrace.git
+cd netrace
+make run
 ```
 
-New here? **Help → Take the Tour** walks through the app on the Shadow
-Network, a multi-agency VLAN operation with every feature set up
-(`examples/tour.netrace`). Choose **File → New from Lab…** (⌥⌘N) for 20 guided CCNA labs that check
-your work as you go (see [LABS.md](LABS.md)). Or open `examples/services.netrace` for a DHCP and access list lab,
-`examples/nat.netrace` for NAT and PAT, `examples/ospf.netrace` for OSPF,
-`examples/vlans.netrace` for a VLAN, trunk and router-on-a-stick lab
-(with a redundant link spanning tree blocks), `examples/two-lans.netrace` to
-configure a router in its console and route between two LANs, `examples/office-lan.netrace` to try the simulation
-(pings between configured PCs), `examples/starter.netrace` for a small
-topology, or `examples/campus.netrace` for one that uses every device kind.
+Then **Help → Take the Tour**, or **File → New from Lab…** (⌥⌘N). Sample projects are in `examples/`; open `examples/tour.netrace` for the Shadow Network.
+
+## Not yet
+
+IPv6, EtherChannel, HSRP, wireless, DNS/NTP/Syslog servers, and importing `.pkt` files. The full plan is in [SCOPE.md](SCOPE.md); the interface direction is in [DESIGN.md](DESIGN.md).
+
+## For developers
+
+```bash
+make test    # Rust tests
+make lint    # rustfmt + clippy
+make open    # open the project in Xcode
+```
+
+After changing anything in `crates/`, run `make core` before building in Xcode: the app links the static library and Swift bindings that step produces.
 
 ## Beta builds
 
@@ -55,7 +136,7 @@ app/
   project.yml    XcodeGen spec (the .xcodeproj is generated, not committed)
   Netrace/       SwiftUI app: document, canvas, library, inspector, design tokens
   Netrace/Design/          tokens (Theme), device symbols, device catalog, icons, appearance
-  Netrace/Workspace/       per-window interface state; preview data for unbuilt panels
+  Netrace/Workspace/       per-window interface state; per-window state
   Netrace/Views/           Window (toolbar, menus, ⌘K), Sidebar, Canvas, Inspector, BottomPanel
   Netrace/Assets.xcassets/ Icons/*.imageset (SVG source of each icon), AppIcon
 design/
@@ -80,3 +161,7 @@ Every edit registers its inverse with the window's undo manager, which is also
 how macOS tracks unsaved changes.
 
 A `.netrace` file is a package (folder) containing `project.json`.
+
+## License
+
+[MIT](LICENSE)
