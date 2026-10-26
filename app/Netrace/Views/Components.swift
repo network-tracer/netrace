@@ -75,9 +75,12 @@ struct TabStrip<Tab: Hashable & Identifiable>: View {
     @Binding var selection: Tab
     let title: (Tab) -> String
     var glyph: ((Tab) -> Glyph)? = nil
+    /// Unselected tabs show only their icon (named in a tooltip), for a
+    /// narrow strip with many tabs.
+    var compact = false
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.l) {
+        HStack(spacing: compact ? Theme.Spacing.m : Theme.Spacing.l) {
             ForEach(tabs) { tab in
                 let isSelected = tab == selection
                 Button {
@@ -87,8 +90,12 @@ struct TabStrip<Tab: Hashable & Identifiable>: View {
                         if let glyph {
                             IconView(glyph(tab), size: 13)
                         }
-                        Text(title(tab))
-                            .font(isSelected ? Theme.Font.captionMedium : Theme.Font.caption)
+                        if !compact || isSelected || glyph == nil {
+                            Text(title(tab))
+                                .font(isSelected ? Theme.Font.captionMedium : Theme.Font.caption)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
                     .foregroundStyle(isSelected ? Theme.Palette.textPrimary : Theme.Palette.textSecondary)
                     .padding(.vertical, Theme.Spacing.s)
@@ -100,6 +107,8 @@ struct TabStrip<Tab: Hashable & Identifiable>: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help(title(tab))
+                .accessibilityLabel(title(tab))
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }

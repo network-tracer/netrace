@@ -148,6 +148,22 @@ struct CanvasView: View {
         .task(id: workspace.isPlaying) { await runSimulationClock() }
     }
 
+    /// Routes of the router under the pointer, drawn along its cables
+    /// (with feature overlays on, outside the protocol views).
+    private var routeHover: LinksLayer.RouteHover? {
+        guard workspace.showsLayer2, !workspace.showsSpanningTree, !workspace.showsOspf, !workspace.showsVlans,
+              let id = workspace.hoveredDevice, let device = document.device(id),
+              device.kind == .router || device.kind == .l3Switch else { return nil }
+        let paths = simulation.routePaths(of: id)
+        return paths.isEmpty ? nil : LinksLayer.RouteHover(device: id, paths: paths)
+    }
+
+    private func vlanFaded(_ id: UInt64) -> Bool {
+        guard let display = VlanDisplay.make(simulation: simulation, workspace: workspace,
+                                             links: document.state.links) else { return false }
+        return !display.devices.contains(id)
+    }
+
     // MARK: World
 
     private var world: some View {
@@ -168,6 +184,8 @@ struct CanvasView: View {
                        layer2: workspace.showsLayer2 ? simulation.layer2 : nil,
                        stp: StpDisplay.make(simulation: simulation, workspace: workspace),
                        ospf: OspfDisplay.make(simulation: simulation, workspace: workspace),
+                       vlan: VlanDisplay.make(simulation: simulation, workspace: workspace, links: document.state.links),
+                       routes: routeHover,
                        services: workspace.showsLayer2 ? simulation.services : [])
                 .allowsHitTesting(false)
 
@@ -226,10 +244,20 @@ struct CanvasView: View {
                          isStpRoot: stpRoot == device.id,
                          isDHCPServer: workspace.showsLayer2
                             && simulation.services.contains { $0.deviceId == device.id && $0.kind == "dhcp-server" },
+                         isNAT: workspace.showsLayer2
+                            && simulation.services.contains { $0.deviceId == device.id && $0.kind.hasPrefix("nat-") },
+                         isFaded: vlanFaded(device.id),
                          isSelected: workspace.selection.contains(device.id) || pendingCableSource == device.id
                             || workspace.pduSource == device.id,
                          zoom: workspace.zoom,
                          onRename: { name in rename(device, to: name) })
+                    .onHover { inside in
+                        if inside {
+                            workspace.hoveredDevice = device.id
+                        } else if workspace.hoveredDevice == device.id {
+                            workspace.hoveredDevice = nil
+                        }
+                    }
                     // Before .position(), so the location is relative to the symbol's frame.
                     .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
                         deviceDoubleTapped(device, at: tap.location)
@@ -1010,6 +1038,9 @@ private struct NodeView: View {
     /// The root bridge in the STP view: a gold band and halo.
     var isStpRoot = false
     var isDHCPServer = false
+    var isNAT = false
+    /// The VLAN view fades devices outside the chosen VLAN.
+    var isFaded = false
     let isSelected: Bool
     let zoom: CGFloat
     /// Returns false if the name was rejected, keeping the field open.
@@ -1026,6 +1057,19 @@ private struct NodeView: View {
         let power = workspace.powerState(device.id)
         DeviceSymbolView(kind: device.kind, isSelected: isSelected, isRoot: isStpRoot,
                          isDimmed: power == .stopped, tint: device.color)
+            .overlay(alignment: .bottomLeading) {
+                if isNAT {
+                    Text("NAT")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color(light: 0x1F8A9E, dark: 0x3AAFC4)))
+                        .offset(x: -10, y: 4)
+                        .help("This router translates addresses (NAT)")
+                }
+            }
+            .opacity(isFaded ? 0.3 : 1)
             .overlay(alignment: .bottomTrailing) {
                 if isDHCPServer {
                     Text("DHCP")

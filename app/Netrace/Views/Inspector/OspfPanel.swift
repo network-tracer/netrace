@@ -11,7 +11,18 @@ struct OspfDisplay {
         var problem: Bool
     }
 
+    struct Adjacency: Equatable {
+        var a: UInt64
+        var b: UInt64
+        /// "FULL", "2WAY" or "DOWN".
+        var state: String
+        var area: UInt32
+    }
+
     var labels: [LinksLayer.PortKey: Label] = [:]
+    var adjacencies: [Adjacency] = []
+    /// More than one area: adjacencies are labelled with theirs.
+    var multiArea = false
     var failedLink: UInt64?
 
     @MainActor
@@ -26,6 +37,20 @@ struct OspfDisplay {
                     Label(cost: iface.cost, role: role, problem: problem)
             }
         }
+        // One line per pair of routers, the best state between them.
+        let rank = ["FULL": 2, "2WAY": 1, "DOWN": 0]
+        var seen: [String: Adjacency] = [:]
+        for router in view.routers {
+            for n in router.neighbors {
+                let key = "\(min(router.deviceId, n.deviceId))-\(max(router.deviceId, n.deviceId))"
+                let area = router.interfaces.first { $0.name == n.iface }?.area ?? 0
+                let candidate = Adjacency(a: router.deviceId, b: n.deviceId, state: n.state, area: area)
+                if let existing = seen[key], rank[existing.state, default: 0] >= rank[n.state, default: 0] { continue }
+                seen[key] = candidate
+            }
+        }
+        display.adjacencies = seen.values.sorted { ($0.a, $0.b) < ($1.a, $1.b) }
+        display.multiArea = Set(view.routers.flatMap { $0.interfaces.map(\.area) }).count > 1
         display.failedLink = workspace.ospfFailedLink
         return display
     }

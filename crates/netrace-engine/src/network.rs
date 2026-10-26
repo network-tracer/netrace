@@ -87,6 +87,12 @@ pub(crate) enum Event {
     DhcpStart {
         host: DeviceId,
     },
+    /// Spanning-tree BPDUs, sent once at the start.
+    SendBpdus,
+    /// OSPF hellos on every OSPF interface, sent once at the start.
+    SendOspfHellos,
+    /// LS Updates between full OSPF neighbours, after the hellos.
+    SendOspfUpdates,
     /// A TCP client sends (or resends) its SYN.
     TcpSyn {
         conn: u64,
@@ -447,6 +453,7 @@ impl Network {
         for &(at, host) in &self.renewals {
             let _ = self.scheduler.schedule_at(at, Event::DhcpStart { host });
         }
+        self.schedule_control_plane();
         self.schedule_tcp();
         for (i, c) in self.commands.iter().enumerate() {
             let session = i as u64;
@@ -545,6 +552,9 @@ impl Network {
             Event::ArpTimeout { device, ip } => self.arp_timeout(now, device, ip),
             Event::DhcpStart { host } => self.dhcp_start(now, host),
             Event::TcpSyn { conn, attempt } => self.tcp_syn(now, conn, attempt),
+            Event::SendBpdus => self.send_bpdus(),
+            Event::SendOspfHellos => self.send_ospf_hellos(),
+            Event::SendOspfUpdates => self.send_ospf_updates(),
             Event::TcpGiveUp { conn } => self.tcp_give_up(now, conn),
             Event::DhcpRetry { host, xid } => self.dhcp_retry(now, host, xid),
             Event::DhcpTimeout { host, xid } => self.dhcp_timeout(now, host, xid),
@@ -957,7 +967,7 @@ impl Network {
         let session = frame
             .and_then(|f| match f.payload {
                 Payload::Ipv4(p) => session_of(&p),
-                Payload::Arp(_) => None,
+                Payload::Arp(_) | Payload::Bpdu(_) => None,
             })
             .or(arrival.and_then(|a| a.tag));
         self.trace.push(TraceEvent {

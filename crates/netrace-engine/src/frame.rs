@@ -8,6 +8,8 @@ pub enum Protocol {
     Icmp,
     Dhcp,
     Tcp,
+    Ospf,
+    Stp,
 }
 
 impl Protocol {
@@ -17,6 +19,8 @@ impl Protocol {
             Protocol::Icmp => "ICMP",
             Protocol::Dhcp => "DHCP",
             Protocol::Tcp => "TCP",
+            Protocol::Ospf => "OSPF",
+            Protocol::Stp => "STP",
         }
     }
 }
@@ -232,12 +236,53 @@ impl Tcp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OspfMessage {
+    /// Finds neighbours and checks they agree (area, timers, subnet).
+    Hello,
+    /// Carries LSAs to a fully adjacent neighbour.
+    LsUpdate,
+}
+
+impl OspfMessage {
+    pub fn name(self) -> &'static str {
+        match self {
+            OspfMessage::Hello => "Hello",
+            OspfMessage::LsUpdate => "LS Update",
+        }
+    }
+}
+
+/// An OSPF packet (IP protocol 89), with the fields its explanation needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OspfPacket {
+    pub message: OspfMessage,
+    pub router_id: Ipv4Addr,
+    pub area: u32,
+    pub hello: u16,
+    pub dead: u16,
+    /// LS Update: how many LSAs it carries.
+    pub lsas: u8,
+}
+
+/// A spanning-tree BPDU (PVST+: one per VLAN).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Bpdu {
+    pub vlan: u16,
+    pub root: crate::BridgeId,
+    pub root_cost: u32,
+    pub bridge: crate::BridgeId,
+    /// 128.N.
+    pub port: u32,
+}
+
 /// What an IPv4 packet carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum L4 {
     Icmp(Icmp),
     Udp(Udp),
     Tcp(Tcp),
+    Ospf(OspfPacket),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,6 +325,7 @@ impl Ipv4Packet {
 pub enum Payload {
     Arp(ArpPacket),
     Ipv4(Ipv4Packet),
+    Bpdu(Bpdu),
 }
 
 /// An Ethernet II frame. Kept structured rather than as bytes: the inspector
@@ -304,7 +350,9 @@ impl Frame {
                 L4::Icmp(_) => Protocol::Icmp,
                 L4::Udp(_) => Protocol::Dhcp,
                 L4::Tcp(_) => Protocol::Tcp,
+                L4::Ospf(_) => Protocol::Ospf,
             },
+            Payload::Bpdu(_) => Protocol::Stp,
         }
     }
 
@@ -312,6 +360,7 @@ impl Frame {
         match self.payload {
             Payload::Arp(_) => "ARP (0x0806)",
             Payload::Ipv4(_) => "IPv4 (0x0800)",
+            Payload::Bpdu(_) => "802.3 LLC (STP)",
         }
     }
 
@@ -320,7 +369,11 @@ impl Frame {
         let tag = if self.vlan.is_some() { 4 } else { 0 };
         tag + match self.payload {
             // 14-byte header + 28-byte ARP, padded to the 60-byte minimum.
-            Payload::Arp(_) => 60,
+            Payload::Arp(_) | Payload::Bpdu(_) => 60,
+            // Ethernet 14 + IPv4 20 + OSPF hello or a small LS Update.
+            Payload::Ipv4(Ipv4Packet {
+                l4: L4::Ospf(o), ..
+            }) => 14 + 20 + 44 + 24 * o.lsas as usize,
             // Errors quote the original IP header and 8 bytes of it.
             Payload::Ipv4(ip) if ip.is_icmp_error() => 14 + 20 + 8 + 28,
             // Ethernet 14 + IPv4 20 + UDP 8 + a minimal DHCP message.
@@ -366,6 +419,24 @@ impl Frame {
                     ),
                 }
             }
+            Payload::Bpdu(b) => format!(
+                "Conf. Root = {}  Cost = {}  Port = 0x{:04x}  VLAN {}",
+                b.root, b.root_cost, b.port, b.vlan
+            ),
+            Payload::Ipv4(Ipv4Packet {
+                l4: L4::Ospf(o), ..
+            }) => match o.message {
+                OspfMessage::Hello => format!(
+                    "Hello Packet  Router ID {}  Area {}  Hello {} / Dead {}",
+                    o.router_id, o.area, o.hello, o.dead
+                ),
+                OspfMessage::LsUpdate => format!(
+                    "LS Update  Router ID {}  {} LSA{}",
+                    o.router_id,
+                    o.lsas,
+                    if o.lsas == 1 { "" } else { "s" }
+                ),
+            },
             Payload::Ipv4(Ipv4Packet {
                 l4: L4::Tcp(tcp), ..
             }) => {

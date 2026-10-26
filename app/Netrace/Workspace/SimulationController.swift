@@ -196,6 +196,26 @@ final class SimulationController: ObservableObject {
     private var ospfCache: (key: String, view: OspfView)?
     private var ospfFailureCache: (key: String, link: UInt64, failure: OspfFailure)?
 
+    private var vlanCache: (key: String, vlans: [VlanInfo])?
+    private var routeCache: (key: String, device: UInt64, paths: [RoutePath])?
+
+    func vlanView() -> [VlanInfo] {
+        guard let simulation else { return [] }
+        if let cache = vlanCache, cache.key == topologyKey { return cache.vlans }
+        let vlans = simulation.vlanView()
+        vlanCache = (topologyKey, vlans)
+        return vlans
+    }
+
+    /// A router's routes grouped by exit port, for the hover paths.
+    func routePaths(of device: UInt64) -> [RoutePath] {
+        guard let simulation else { return [] }
+        if let cache = routeCache, cache.key == topologyKey, cache.device == device { return cache.paths }
+        let paths = simulation.routePaths(device: device)
+        routeCache = (topologyKey, device, paths)
+        return paths
+    }
+
     private var labCache: (key: String, results: [LabTaskResult])?
 
     /// Lab progress for the topology as it is now; worked out once per change.

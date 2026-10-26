@@ -15,6 +15,10 @@ fn field(name: &str, value: impl ToString, changed: bool) -> Field {
 fn mac_label(mac: MacAddr) -> String {
     if mac.is_broadcast() {
         format!("{mac} (broadcast)")
+    } else if mac == MacAddr::OSPF_ALL_ROUTERS {
+        format!("{mac} (OSPF routers)")
+    } else if mac == MacAddr::STP_BRIDGES {
+        format!("{mac} (spanning tree)")
     } else if mac == MacAddr::ZERO {
         format!("{mac} (unknown)")
     } else {
@@ -136,6 +140,16 @@ pub(crate) fn message(role: LayerRole, note: impl Into<String>, packet: &Ipv4Pac
         crate::L4::Icmp(icmp) => self::icmp(role, note, &icmp),
         crate::L4::Udp(udp) => dhcp(role, note, &udp),
         crate::L4::Tcp(tcp) => self::tcp(role, note, &tcp),
+        crate::L4::Ospf(o) => LayerNote {
+            layer: Layer::Message,
+            role,
+            note: note.into(),
+            fields: vec![
+                field("Protocol", "OSPF", false),
+                field("Message", o.message.name(), false),
+                field("Router ID", o.router_id, false),
+            ],
+        },
     }
 }
 

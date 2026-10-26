@@ -127,6 +127,8 @@ fn flow(packet: &Ipv4Packet) -> (NatProto, u16, u16) {
         L4::Icmp(icmp) => (NatProto::Icmp, icmp.id, icmp.id),
         L4::Udp(udp) => (NatProto::Udp, udp.src_port, udp.dst_port),
         L4::Tcp(tcp) => (NatProto::Tcp, tcp.src_port, tcp.dst_port),
+        // Link-local multicast: never crosses a NAT router.
+        L4::Ospf(_) => (NatProto::Icmp, 0, 0),
     }
 }
 
@@ -136,6 +138,7 @@ fn rewrite_src(packet: &Ipv4Packet, ip: Ipv4Addr, port: u16) -> Ipv4Packet {
         L4::Icmp(icmp) => icmp.id = port,
         L4::Udp(udp) => udp.src_port = port,
         L4::Tcp(tcp) => tcp.src_port = port,
+        L4::Ospf(_) => {}
     }
     out
 }
@@ -146,6 +149,7 @@ fn rewrite_dst(packet: &Ipv4Packet, ip: Ipv4Addr, port: u16) -> Ipv4Packet {
         L4::Icmp(icmp) => icmp.id = port,
         L4::Udp(udp) => udp.dst_port = port,
         L4::Tcp(tcp) => tcp.dst_port = port,
+        L4::Ospf(_) => {}
     }
     out
 }

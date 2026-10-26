@@ -2422,3 +2422,83 @@ fn pat_translates_tcp_ports() {
         .expect("a TCP translation");
     assert_eq!(tcp.inside_global(), "203.0.113.1:49152");
 }
+
+#[test]
+fn ospf_hellos_and_lsas_are_traced() {
+    let (mut p, [r1, r2, r3], _, _) = triangle();
+    for r in [r1, r2, r3] {
+        ospf_on(&mut p, r, &[]);
+    }
+    edit_iface(&mut p, r1, "GigabitEthernet0/2", |i| i.ospf.hello = Some(5));
+    let net = Network::new(p);
+    let ospf: Vec<&TraceEvent> = net
+        .trace()
+        .iter()
+        .filter(|e| {
+            e.frame
+                .is_some_and(|f| f.protocol() == crate::Protocol::Ospf)
+        })
+        .collect();
+    assert!(
+        ospf.iter().any(|e| e.device == r2
+            && e.outcome == Outcome::Accepted
+            && e.summary.contains("hears R1's hello")
+            && e.summary.contains("Full")),
+        "{:#?}",
+        ospf.iter().map(|e| &e.summary).collect::<Vec<_>>()
+    );
+    // R1–R3 have mismatched timers: the hello is rejected with the reason.
+    assert!(ospf.iter().any(|e| e.device == r3
+        && e.outcome == Outcome::Dropped
+        && e.summary.contains("hello/dead timers differ")));
+    assert!(ospf.iter().any(|e| e.device == r1
+        && e.summary.contains("LS Update")
+        && e.summary.contains("link-state database")));
+    // Hosts' cards filter OSPF out silently.
+    assert!(
+        ospf.iter()
+            .all(|e| e.device == r1 || e.device == r2 || e.device == r3)
+    );
+}
+
+#[test]
+fn bpdus_explain_port_roles() {
+    let mut p = Project::new();
+    let s1 = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    let s2 = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    p.connect(
+        end(s1, "GigabitEthernet0/1"),
+        end(s2, "GigabitEthernet0/1"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        end(s1, "GigabitEthernet0/2"),
+        end(s2, "GigabitEthernet0/2"),
+        Medium::Copper,
+    )
+    .unwrap();
+    let net = Network::new(p);
+    let root = net.layer2().trees[&1].root_device;
+    let other = if root == s1 { s2 } else { s1 };
+    let bpdus: Vec<&TraceEvent> = net
+        .trace()
+        .iter()
+        .filter(|e| {
+            e.frame
+                .is_some_and(|f| f.protocol() == crate::Protocol::Stp)
+        })
+        .collect();
+    assert_eq!(
+        bpdus.len(),
+        2,
+        "the root's two designated ports send one each"
+    );
+    assert!(bpdus.iter().all(|e| e.device == other));
+    assert!(
+        bpdus
+            .iter()
+            .any(|e| e.summary.contains("becomes") && e.summary.contains("root port"))
+    );
+    assert!(bpdus.iter().any(|e| e.summary.contains("blocks")));
+}

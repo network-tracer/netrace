@@ -42,6 +42,15 @@ struct LinksLayer: View {
     var stp: StpDisplay?
     /// Costs and DR / BDR in the OSPF view (replaces the lights).
     var ospf: OspfDisplay?
+    /// The VLAN view: links carrying the chosen VLAN, everything else faded.
+    var vlan: VlanDisplay?
+    /// The hovered router's routes, labelled at the ports they leave by.
+    var routes: RouteHover?
+
+    struct RouteHover: Equatable {
+        let device: UInt64
+        let paths: [RoutePath]
+    }
     /// ACL and relay badges at interface ends.
     var services: [ServiceBadge] = []
 
@@ -77,8 +86,17 @@ struct LinksLayer: View {
                 let trunk = endA?.trunk == true || endB?.trunk == true
                 // An access link takes its VLAN's colour (VLAN 1 stays neutral).
                 let vlan = trunk ? nil : (endA?.vlan ?? endB?.vlan).flatMap { $0 == 1 ? nil : $0 }
-                Self.drawCable(link, from: a, to: b, direction: dir, isSelected: isSelected,
-                               tint: vlan.map(Self.vlanColor), trunk: trunk, in: &context)
+                let inVlan = self.vlan.map { $0.carries(link) }
+                var cableContext = context
+                if inVlan == false { cableContext.opacity = 0.18 }
+                let tint = self.vlan != nil ? (inVlan == true ? Self.vlanColor(self.vlan!.vlan) : nil) : vlan.map(Self.vlanColor)
+                let routed = routes.flatMap { r in
+                    r.device == link.a.deviceId ? r.paths.first { $0.port == link.a.port }
+                        : r.device == link.b.deviceId ? r.paths.first { $0.port == link.b.port } : nil
+                }
+                Self.drawCable(link, from: a, to: b, direction: dir, isSelected: isSelected || routed != nil,
+                               tint: tint, trunk: trunk, in: &cableContext)
+                if inVlan == false { continue }
                 let edgeA = Self.edgeDistance(kindA, dir)
                 let edgeB = Self.edgeDistance(kindB, CGPoint(x: -dir.x, y: -dir.y))
                 let state = linkState(link)
@@ -130,6 +148,12 @@ struct LinksLayer: View {
                     }
                 }
 
+                if let routes, let path = routed {
+                    let fromA = routes.device == link.a.deviceId
+                    Self.drawRouteLabel(path.routes, near: fromA ? a : b, toward: fromA ? dir : CGPoint(x: -dir.x, y: -dir.y),
+                                        edge: fromA ? edgeA : edgeB, in: &context)
+                }
+
                 if isCaptured {
                     let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
                     let badge = context.resolve(Image(Icon.capture.rawValue))
@@ -139,7 +163,7 @@ struct LinksLayer: View {
                 }
 
                 // Semantic zoom: below 70 % the labels would be unreadably small.
-                guard stp == nil, ospf == nil, workspace.showsInterfaceLabels, workspace.zoom >= 0.7, length > edgeA + edgeB + 100 else { continue }
+                guard stp == nil, ospf == nil, routes == nil, workspace.showsInterfaceLabels, workspace.zoom >= 0.7, length > edgeA + edgeB + 100 else { continue }
                 for (center, edge, sign, port) in [(a, edgeA, 1.0, link.a.port), (b, edgeB, -1.0, link.b.port)] {
                     // Cables leaving downward pass the device's name label; start labels below it.
                     let clearance: CGFloat = dir.y * sign > 0.5 ? 46 : 26
@@ -156,7 +180,65 @@ struct LinksLayer: View {
                     context.draw(text, at: p)
                 }
             }
+            if let ospf {
+                Self.drawAdjacencies(ospf, positions: positions, in: &context)
+            }
         }
+    }
+
+    /// OSPF view: a curved line between each pair of neighbouring routers,
+    /// bowed off the cables so it reads as a relationship, not a wire.
+    /// Green when full, a quiet dashed grey at 2-Way, red dashes when down.
+    static func drawAdjacencies(_ ospf: OspfDisplay, positions: [UInt64: CGPoint], in context: inout GraphicsContext) {
+        for adjacency in ospf.adjacencies {
+            guard let a = positions[adjacency.a], let b = positions[adjacency.b] else { continue }
+            let length = hypot(b.x - a.x, b.y - a.y)
+            guard length > 1 else { continue }
+            let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+            let normal = CGPoint(x: -(b.y - a.y) / length, y: (b.x - a.x) / length)
+            let bow = min(46, length * 0.18)
+            let control = CGPoint(x: mid.x + normal.x * bow, y: mid.y + normal.y * bow)
+            var path = Path()
+            path.move(to: a)
+            path.addQuadCurve(to: b, control: control)
+            let (color, dash): (Color, [CGFloat]) = switch adjacency.state {
+            case "FULL": (Theme.Palette.statusUp, [])
+            case "2WAY": (Theme.Palette.textTertiary, [4, 4])
+            default: (Theme.Palette.statusDown, [3, 4])
+            }
+            context.stroke(path, with: .color(color.opacity(0.75)),
+                           style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: dash))
+            if ospf.multiArea {
+                // The curve's apex is halfway to the control point.
+                let apex = CGPoint(x: (mid.x + control.x) / 2, y: (mid.y + control.y) / 2)
+                let text = context.resolve(Text("area \(adjacency.area)")
+                    .font(.system(size: 8.5, weight: .semibold)).foregroundColor(color))
+                let size = text.measure(in: CGSize(width: 100, height: 20))
+                let box = Path(roundedRect: CGRect(x: apex.x - size.width / 2 - 4, y: apex.y - 7,
+                                                   width: size.width + 8, height: 14), cornerRadius: 7)
+                context.fill(box, with: .color(Theme.Palette.canvas))
+                context.draw(text, at: apex)
+            }
+        }
+    }
+
+    /// The hovered router's routes out of one port, in a small card just
+    /// past the port, along the cable.
+    static func drawRouteLabel(_ routes: [String], near center: CGPoint, toward dir: CGPoint, edge: CGFloat,
+                               in context: inout GraphicsContext) {
+        let shown = routes.prefix(4)
+        var lines = shown.joined(separator: "\n")
+        if routes.count > shown.count { lines += "\n+\(routes.count - shown.count) more" }
+        let text = context.resolve(Text(lines).font(Theme.Font.monoSmall).foregroundColor(Theme.Palette.textPrimary))
+        let size = text.measure(in: CGSize(width: 320, height: 200))
+        let distance = edge + 30 + max(size.width, size.height) / 2
+        let p = CGPoint(x: center.x + dir.x * distance, y: center.y + dir.y * distance)
+        let box = CGRect(x: p.x - size.width / 2 - 6, y: p.y - size.height / 2 - 4,
+                         width: size.width + 12, height: size.height + 8)
+        let shape = Path(roundedRect: box, cornerRadius: 6)
+        context.fill(shape, with: .color(Theme.Palette.surface))
+        context.stroke(shape, with: .color(Theme.Palette.accent.opacity(0.6)), lineWidth: 1)
+        context.draw(text, at: p)
     }
 
     private func linkState(_ link: LinkInfo) -> WorkspaceModel.PowerState {

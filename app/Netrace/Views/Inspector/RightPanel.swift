@@ -10,7 +10,7 @@ struct RightPanel: View {
         VStack(spacing: 0) {
             HStack {
                 TabStrip(tabs: WorkspaceModel.RightPane.allCases, selection: $workspace.rightPane,
-                         title: \.title, glyph: \.glyph)
+                         title: \.title, glyph: \.glyph, compact: true)
                 Spacer()
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -22,6 +22,7 @@ struct RightPanel: View {
             case .lab: LabPanel(document: document, workspace: workspace)
             case .spanningTree: SpanningTreePanel(document: document, workspace: workspace)
             case .ospf: OspfPanel(document: document, workspace: workspace)
+            case .vlans: VlanPanel(document: document, workspace: workspace)
             }
         }
         .background(Theme.Palette.surface)

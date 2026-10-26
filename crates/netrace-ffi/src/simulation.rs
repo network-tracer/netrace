@@ -277,7 +277,7 @@ impl From<&engine::TraceEvent> for TraceEventInfo {
     fn from(e: &engine::TraceEvent) -> Self {
         let (source, destination) = match e.frame.map(|f| f.payload) {
             Some(engine::Payload::Ipv4(ip)) => (Some(ip.src.to_string()), Some(ip.dst.to_string())),
-            Some(engine::Payload::Arp(_)) => (
+            Some(engine::Payload::Arp(_) | engine::Payload::Bpdu(_)) => (
                 e.frame.map(|f| f.src.to_string()),
                 e.frame.map(|f| f.dst.to_string()),
             ),

@@ -11,6 +11,7 @@
 //! and the commands. That keeps simulation mode freely scrubbable.
 
 mod acl;
+mod control;
 mod dhcp;
 mod explain;
 mod frame;
@@ -33,8 +34,9 @@ mod views;
 pub use acl::{AclDecision, AclDirection};
 pub use dhcp::DhcpBinding;
 pub use frame::{
-    ArpOp, ArpPacket, DHCP_CLIENT_PORT, DHCP_SERVER_PORT, Dhcp, DhcpOp, Frame, Icmp, IcmpKind,
-    Ipv4Packet, L4, Payload, Protocol, Tcp, TcpFlags, Udp, Unreachable,
+    ArpOp, ArpPacket, Bpdu, DHCP_CLIENT_PORT, DHCP_SERVER_PORT, Dhcp, DhcpOp, Frame, Icmp,
+    IcmpKind, Ipv4Packet, L4, OspfMessage, OspfPacket, Payload, Protocol, Tcp, TcpFlags, Udp,
+    Unreachable,
 };
 pub use mac::MacAddr;
 pub use nat::{NatDecision, NatDirection, NatEntry, NatKind, NatProto};

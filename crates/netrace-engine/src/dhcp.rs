@@ -840,6 +840,6 @@ fn client_frame(mac: MacAddr, dhcp: Dhcp) -> Frame {
 fn ip_of(frame: &Frame) -> &Ipv4Packet {
     match &frame.payload {
         Payload::Ipv4(ip) => ip,
-        Payload::Arp(_) => unreachable!("DHCP frames carry IPv4"),
+        Payload::Arp(_) | Payload::Bpdu(_) => unreachable!("DHCP frames carry IPv4"),
     }
 }

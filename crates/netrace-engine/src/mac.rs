@@ -9,6 +9,10 @@ pub struct MacAddr(pub [u8; 6]);
 impl MacAddr {
     pub const BROADCAST: MacAddr = MacAddr([0xff; 6]);
     pub const ZERO: MacAddr = MacAddr([0; 6]);
+    /// OSPF's AllSPFRouters group (224.0.0.5).
+    pub const OSPF_ALL_ROUTERS: MacAddr = MacAddr([0x01, 0x00, 0x5e, 0x00, 0x00, 0x05]);
+    /// Where spanning-tree BPDUs go: switches keep them, never forward them.
+    pub const STP_BRIDGES: MacAddr = MacAddr([0x01, 0x80, 0xc2, 0x00, 0x00, 0x00]);
 
     /// Deterministic, locally administered address for a device's port, so
     /// the same project always shows the same MACs.
@@ -26,6 +30,11 @@ impl MacAddr {
 
     pub fn is_broadcast(&self) -> bool {
         *self == Self::BROADCAST
+    }
+
+    /// Group addresses (the low bit of the first octet), broadcast included.
+    pub fn is_multicast(&self) -> bool {
+        self.0[0] & 1 == 1
     }
 }
 

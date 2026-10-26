@@ -64,6 +64,19 @@ impl Network {
         let port = abbreviate_port(&arrival.port);
         let arrived = explain::physical(format!("Arrived on {port}."));
 
+        // Multicast the card hasn't joined (OSPF on a host) or never
+        // forwards (BPDUs) is filtered out silently, as real NICs do.
+        match frame.payload {
+            Payload::Ipv4(
+                ip @ Ipv4Packet {
+                    l4: L4::Ospf(o), ..
+                },
+            ) => {
+                return self.ospf_receive(now, id, &stack, &iface, arrival, frame, ip, o);
+            }
+            Payload::Bpdu(_) => return,
+            _ => {}
+        }
         if frame.dst != iface.mac && !frame.dst.is_broadcast() {
             let layers = vec![
                 arrived,
@@ -103,6 +116,8 @@ impl Network {
         };
 
         match frame.payload {
+            // Hosts and routers don't run spanning tree: their cards drop BPDUs.
+            Payload::Bpdu(_) => {}
             Payload::Arp(arp) if arp.op == ArpOp::Request => {
                 self.arp_request_received(now, id, &stack, &iface, arrival, frame, arp, accepted)
             }
@@ -363,6 +378,8 @@ impl Network {
             L4::Tcp(tcp) => {
                 return self.tcp_receive(now, id, stack, own, arrival, frame, packet, tcp);
             }
+            // Handled as it arrives (it's multicast); never delivered here.
+            L4::Ospf(_) => return,
         };
         let name = self.name(id);
         let port = abbreviate_port(&arrival.port);
@@ -947,6 +964,7 @@ impl Network {
             L4::Icmp(_) => "packet",
             L4::Udp(_) => "DHCP packet",
             L4::Tcp(_) => "TCP segment",
+            L4::Ospf(_) => "OSPF packet",
         };
         let summary = format!(
             "{name} checks access list {} {} on {} against the {what} from {} to {}. It matches {}, so the packet is \
@@ -1082,7 +1100,7 @@ impl Network {
         let (quoted_id, quoted_seq) = match original.l4 {
             L4::Icmp(i) => (i.id, i.seq),
             L4::Tcp(t) => (0, t.src_port),
-            L4::Udp(_) => (0, 0),
+            L4::Udp(_) | L4::Ospf(_) => (0, 0),
         };
         let Some(src) = in_iface.address.map(|a| a.address).or_else(|| {
             stack
@@ -1485,6 +1503,7 @@ fn describe_packet(packet: &Ipv4Packet) -> String {
                 _ => format!("a TCP segment [{}]", tcp.flags.names()),
             };
         }
+        L4::Ospf(o) => return format!("an OSPF {}", o.message.name()),
     };
     match icmp.kind {
         IcmpKind::EchoRequest => format!("ping {} (an ICMP echo request)", icmp.seq),
@@ -1499,6 +1518,7 @@ fn icmp_note(packet: &Ipv4Packet) -> String {
         L4::Icmp(icmp) => icmp,
         L4::Udp(udp) => return format!("DHCP {}, relayed to the server.", udp.dhcp.op.name()),
         L4::Tcp(tcp) => return format!("TCP [{}], carried along untouched.", tcp.flags.names()),
+        L4::Ospf(o) => return format!("OSPF {}.", o.message.name()),
     };
     match icmp.kind {
         IcmpKind::EchoRequest => format!("Echo request number {}.", icmp.seq),

@@ -113,7 +113,7 @@ final class WorkspaceModel: ObservableObject {
     /// instructions stay visible next to the console in the bottom panel.
     enum RightPane: String, CaseIterable, Identifiable {
         /// The STP pane also turns on the spanning-tree view of the canvas.
-        case inspector, lab, spanningTree, ospf
+        case inspector, lab, spanningTree, ospf, vlans
         var id: Self { self }
 
         var title: String {
@@ -122,6 +122,7 @@ final class WorkspaceModel: ObservableObject {
             case .lab: "Lab"
             case .spanningTree: "STP"
             case .ospf: "OSPF"
+            case .vlans: "VLANs"
             }
         }
 
@@ -131,6 +132,7 @@ final class WorkspaceModel: ObservableObject {
             case .lab: .custom(.lab)
             case .spanningTree: .system("point.3.connected.trianglepath.dotted")
             case .ospf: .system("arrow.triangle.branch")
+            case .vlans: .system("square.stack.3d.down.right")
             }
         }
     }
@@ -219,6 +221,14 @@ final class WorkspaceModel: ObservableObject {
         stpFailedLink = id
         stpStep = 0
     }
+
+    /// The device under the pointer (routers show their routes as paths).
+    @Published var hoveredDevice: UInt64?
+
+    /// VLAN view: the VLAN highlighted on the canvas.
+    @Published var selectedVlan: UInt16?
+
+    var showsVlans: Bool { showsInspector && rightPane == .vlans }
 
     /// The bundled-lab browser sheet.
     @Published var showsLabBrowser = false

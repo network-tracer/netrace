@@ -25,6 +25,10 @@ impl Network {
         arrival: Arrival,
         frame: Frame,
     ) {
+        // BPDUs are for the switch itself: read, never forwarded.
+        if let crate::Payload::Bpdu(bpdu) = frame.payload {
+            return self.bpdu_receive(now, id, arrival, frame, bpdu);
+        }
         let name = self.name(id);
         let ingress = arrival.port.clone();
         let p = abbreviate_port(&ingress);
@@ -111,6 +115,8 @@ impl Network {
                     .collect();
                 let reason = if frame.dst.is_broadcast() {
                     "The frame is a broadcast".to_string()
+                } else if frame.dst.is_multicast() {
+                    "The frame is multicast (switches flood it like a broadcast)".to_string()
                 } else {
                     format!("It doesn't know where {dst} is yet")
                 };

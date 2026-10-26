@@ -14,10 +14,12 @@ mod console;
 mod labs;
 mod simulation;
 mod style;
+mod views;
 pub use console::*;
 pub use labs::*;
 pub use simulation::*;
 pub use style::*;
+pub use views::*;
 
 /// Version of the Rust core, shown in the app's About panel and status bar.
 #[uniffi::export]
