@@ -155,7 +155,7 @@ private struct ConsoleTab: View {
                         if transcript.secret {
                             SecureField("", text: $input)
                         } else {
-                            TextField(active.kind.isHost ? "ping, tracert, ipconfig, arp -a, help"
+                            TextField(active.kind.isHost ? "ping, tracert, ipconfig, curl, help"
                                                          : "Type a command, ? for help, Tab to complete", text: $input)
                         }
                     }

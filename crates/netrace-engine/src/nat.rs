@@ -19,6 +19,7 @@ const PAT_FIRST_PORT: u16 = 1024;
 pub enum NatProto {
     Icmp,
     Udp,
+    Tcp,
 }
 
 impl NatProto {
@@ -26,6 +27,7 @@ impl NatProto {
         match self {
             NatProto::Icmp => "icmp",
             NatProto::Udp => "udp",
+            NatProto::Tcp => "tcp",
         }
     }
 }
@@ -124,6 +126,7 @@ fn flow(packet: &Ipv4Packet) -> (NatProto, u16, u16) {
     match packet.l4 {
         L4::Icmp(icmp) => (NatProto::Icmp, icmp.id, icmp.id),
         L4::Udp(udp) => (NatProto::Udp, udp.src_port, udp.dst_port),
+        L4::Tcp(tcp) => (NatProto::Tcp, tcp.src_port, tcp.dst_port),
     }
 }
 
@@ -132,6 +135,7 @@ fn rewrite_src(packet: &Ipv4Packet, ip: Ipv4Addr, port: u16) -> Ipv4Packet {
     match &mut out.l4 {
         L4::Icmp(icmp) => icmp.id = port,
         L4::Udp(udp) => udp.src_port = port,
+        L4::Tcp(tcp) => tcp.src_port = port,
     }
     out
 }
@@ -141,6 +145,7 @@ fn rewrite_dst(packet: &Ipv4Packet, ip: Ipv4Addr, port: u16) -> Ipv4Packet {
     match &mut out.l4 {
         L4::Icmp(icmp) => icmp.id = port,
         L4::Udp(udp) => udp.dst_port = port,
+        L4::Tcp(tcp) => tcp.dst_port = port,
     }
     out
 }

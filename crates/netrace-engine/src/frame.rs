@@ -7,6 +7,7 @@ pub enum Protocol {
     Arp,
     Icmp,
     Dhcp,
+    Tcp,
 }
 
 impl Protocol {
@@ -15,6 +16,7 @@ impl Protocol {
             Protocol::Arp => "ARP",
             Protocol::Icmp => "ICMP",
             Protocol::Dhcp => "DHCP",
+            Protocol::Tcp => "TCP",
         }
     }
 }
@@ -139,11 +141,103 @@ pub struct Udp {
     pub dhcp: Dhcp,
 }
 
+/// TCP control flags set on a segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TcpFlags {
+    pub syn: bool,
+    pub ack: bool,
+    pub psh: bool,
+    pub fin: bool,
+    pub rst: bool,
+}
+
+impl TcpFlags {
+    pub const SYN: TcpFlags = TcpFlags {
+        syn: true,
+        ack: false,
+        psh: false,
+        fin: false,
+        rst: false,
+    };
+    pub const SYN_ACK: TcpFlags = TcpFlags {
+        syn: true,
+        ack: true,
+        psh: false,
+        fin: false,
+        rst: false,
+    };
+    pub const ACK: TcpFlags = TcpFlags {
+        syn: false,
+        ack: true,
+        psh: false,
+        fin: false,
+        rst: false,
+    };
+    pub const PSH_ACK: TcpFlags = TcpFlags {
+        syn: false,
+        ack: true,
+        psh: true,
+        fin: false,
+        rst: false,
+    };
+    pub const FIN_ACK: TcpFlags = TcpFlags {
+        syn: false,
+        ack: true,
+        psh: false,
+        fin: true,
+        rst: false,
+    };
+    pub const RST_ACK: TcpFlags = TcpFlags {
+        syn: false,
+        ack: true,
+        psh: false,
+        fin: false,
+        rst: true,
+    };
+
+    /// "SYN, ACK", as Wireshark lists them.
+    pub fn names(self) -> String {
+        let mut names = Vec::new();
+        for (on, name) in [
+            (self.fin, "FIN"),
+            (self.syn, "SYN"),
+            (self.rst, "RST"),
+            (self.psh, "PSH"),
+            (self.ack, "ACK"),
+        ] {
+            if on {
+                names.push(name);
+            }
+        }
+        names.join(", ")
+    }
+}
+
+/// A TCP segment. Only what the handshake, one request and one response
+/// and the close need; `data` names the application message it carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tcp {
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub flags: TcpFlags,
+    pub seq: u32,
+    pub ack: u32,
+    pub data: Option<&'static str>,
+}
+
+impl Tcp {
+    /// Bytes of payload (the length of the message it stands for).
+    pub fn data_len(&self) -> u32 {
+        self.data.map(|d| d.len() as u32).unwrap_or(0)
+    }
+}
+
 /// What an IPv4 packet carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum L4 {
     Icmp(Icmp),
     Udp(Udp),
+    Tcp(Tcp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,14 +252,21 @@ impl Ipv4Packet {
     pub fn icmp(&self) -> Option<&Icmp> {
         match &self.l4 {
             L4::Icmp(icmp) => Some(icmp),
-            L4::Udp(_) => None,
+            _ => None,
         }
     }
 
     pub fn udp(&self) -> Option<&Udp> {
         match &self.l4 {
             L4::Udp(udp) => Some(udp),
-            L4::Icmp(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn tcp(&self) -> Option<&Tcp> {
+        match &self.l4 {
+            L4::Tcp(tcp) => Some(tcp),
+            _ => None,
         }
     }
 
@@ -202,6 +303,7 @@ impl Frame {
             Payload::Ipv4(ip) => match ip.l4 {
                 L4::Icmp(_) => Protocol::Icmp,
                 L4::Udp(_) => Protocol::Dhcp,
+                L4::Tcp(_) => Protocol::Tcp,
             },
         }
     }
@@ -223,6 +325,10 @@ impl Frame {
             Payload::Ipv4(ip) if ip.is_icmp_error() => 14 + 20 + 8 + 28,
             // Ethernet 14 + IPv4 20 + UDP 8 + a minimal DHCP message.
             Payload::Ipv4(Ipv4Packet { l4: L4::Udp(_), .. }) => 14 + 20 + 8 + 300,
+            // Ethernet 14 + IPv4 20 + TCP 20 + data, padded to the 60-byte minimum.
+            Payload::Ipv4(Ipv4Packet {
+                l4: L4::Tcp(tcp), ..
+            }) => (14 + 20 + 20 + tcp.data_len() as usize).max(60),
             // Ethernet 14 + IPv4 20 + ICMP 8 + data.
             Payload::Ipv4(_) => 14 + 20 + 8 + PING_DATA_BYTES,
         }
@@ -259,6 +365,23 @@ impl Frame {
                         d.your_ip
                     ),
                 }
+            }
+            Payload::Ipv4(Ipv4Packet {
+                l4: L4::Tcp(tcp), ..
+            }) => {
+                let mut text = format!(
+                    "{} → {} [{}] Seq={} Ack={} Len={}",
+                    tcp.src_port,
+                    tcp.dst_port,
+                    tcp.flags.names(),
+                    tcp.seq,
+                    tcp.ack,
+                    tcp.data_len()
+                );
+                if let Some(d) = tcp.data {
+                    text += &format!("  {d}");
+                }
+                text
             }
             Payload::Ipv4(Ipv4Packet {
                 l4: L4::Icmp(icmp),

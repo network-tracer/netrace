@@ -94,7 +94,10 @@ pub(crate) fn evaluate(
                 e.source_port.is_none_or(|p| p.matches(udp.src_port))
                     && e.destination_port.is_none_or(|p| p.matches(udp.dst_port))
             }
-            // No TCP traffic is simulated yet, so TCP lines never match.
+            (AclProtocol::Tcp, L4::Tcp(tcp)) => {
+                e.source_port.is_none_or(|p| p.matches(tcp.src_port))
+                    && e.destination_port.is_none_or(|p| p.matches(tcp.dst_port))
+            }
             _ => false,
         }
     });

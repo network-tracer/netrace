@@ -87,6 +87,15 @@ pub(crate) enum Event {
     DhcpStart {
         host: DeviceId,
     },
+    /// A TCP client sends (or resends) its SYN.
+    TcpSyn {
+        conn: u64,
+        attempt: usize,
+    },
+    /// A TCP connection that never got an answer gives up.
+    TcpGiveUp {
+        conn: u64,
+    },
     DhcpRetry {
         host: DeviceId,
         xid: u32,
@@ -152,6 +161,9 @@ pub struct Network {
     pub(crate) dhcp_leases_held: BTreeMap<DeviceId, crate::Dhcp>,
     /// `ipconfig /renew` typed on end devices, replayed with everything else.
     renewals: Vec<(SimTime, DeviceId)>,
+    /// TCP connections opened from end devices (`curl`, `telnet`), replayed.
+    pub(crate) tcp_commands: Vec<crate::tcp::TcpCommand>,
+    pub(crate) tcp_conns: Vec<crate::TcpConn>,
     /// ACL line hits, by (device, list, sequence), for `show access-lists`.
     pub(crate) acl_hits: BTreeMap<(DeviceId, String, u32), u32>,
     /// The ACL decision to attach to the next event this device records.
@@ -191,6 +203,8 @@ impl Network {
             dhcp_bindings: BTreeMap::new(),
             dhcp_leases_held: BTreeMap::new(),
             renewals: Vec::new(),
+            tcp_commands: Vec::new(),
+            tcp_conns: Vec::new(),
             acl_hits: BTreeMap::new(),
             pending_acl: None,
             nat_tables: BTreeMap::new(),
@@ -303,7 +317,7 @@ impl Network {
     // MARK: Running
 
     /// Resets every device and replays all commands from time zero.
-    fn rebuild(&mut self) {
+    pub(crate) fn rebuild(&mut self) {
         self.scheduler = Scheduler::new();
         self.trace.clear();
         self.warnings.clear();
@@ -433,6 +447,7 @@ impl Network {
         for &(at, host) in &self.renewals {
             let _ = self.scheduler.schedule_at(at, Event::DhcpStart { host });
         }
+        self.schedule_tcp();
         for (i, c) in self.commands.iter().enumerate() {
             let session = i as u64;
             if self.sessions[i].is_sequential() {
@@ -529,6 +544,8 @@ impl Network {
             Event::ProbeTimeout { session, seq } => self.probe_timeout(now, session, seq),
             Event::ArpTimeout { device, ip } => self.arp_timeout(now, device, ip),
             Event::DhcpStart { host } => self.dhcp_start(now, host),
+            Event::TcpSyn { conn, attempt } => self.tcp_syn(now, conn, attempt),
+            Event::TcpGiveUp { conn } => self.tcp_give_up(now, conn),
             Event::DhcpRetry { host, xid } => self.dhcp_retry(now, host, xid),
             Event::DhcpTimeout { host, xid } => self.dhcp_timeout(now, host, xid),
         }

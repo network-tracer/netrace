@@ -135,6 +135,43 @@ pub(crate) fn message(role: LayerRole, note: impl Into<String>, packet: &Ipv4Pac
     match packet.l4 {
         crate::L4::Icmp(icmp) => self::icmp(role, note, &icmp),
         crate::L4::Udp(udp) => dhcp(role, note, &udp),
+        crate::L4::Tcp(tcp) => self::tcp(role, note, &tcp),
+    }
+}
+
+pub(crate) fn tcp(role: LayerRole, note: impl Into<String>, tcp: &crate::Tcp) -> LayerNote {
+    let changed = role == LayerRole::Changed;
+    let service = match crate::service(tcp.dst_port) {
+        "" => crate::service(tcp.src_port),
+        s => s,
+    };
+    let mut fields = vec![
+        field(
+            "Protocol",
+            if service.is_empty() {
+                "TCP".to_string()
+            } else {
+                format!("TCP ({service})")
+            },
+            changed,
+        ),
+        field(
+            "Ports",
+            format!("{} → {}", tcp.src_port, tcp.dst_port),
+            changed,
+        ),
+        field("Flags", tcp.flags.names(), changed),
+        field("Sequence", tcp.seq, changed),
+        field("Acknowledgement", tcp.ack, changed),
+    ];
+    if let Some(d) = tcp.data {
+        fields.push(field("Data", d, changed));
+    }
+    LayerNote {
+        layer: Layer::Message,
+        role,
+        note: note.into(),
+        fields,
     }
 }
 

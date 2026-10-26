@@ -24,6 +24,7 @@ mod routing;
 mod stack;
 mod stp;
 mod switching;
+mod tcp;
 #[cfg(test)]
 mod tests;
 mod trace;
@@ -33,7 +34,7 @@ pub use acl::{AclDecision, AclDirection};
 pub use dhcp::DhcpBinding;
 pub use frame::{
     ArpOp, ArpPacket, DHCP_CLIENT_PORT, DHCP_SERVER_PORT, Dhcp, DhcpOp, Frame, Icmp, IcmpKind,
-    Ipv4Packet, L4, Payload, Protocol, Udp, Unreachable,
+    Ipv4Packet, L4, Payload, Protocol, Tcp, TcpFlags, Udp, Unreachable,
 };
 pub use mac::MacAddr;
 pub use nat::{NatDecision, NatDirection, NatEntry, NatKind, NatProto};
@@ -48,6 +49,7 @@ pub use probe::{
 };
 pub use stack::{Route, RouteSource};
 pub use stp::{BridgeId, Layer2, PortRole, StpBridge, StpChange, StpPort, VlanTree, bridge_mac};
+pub use tcp::{TcpApp, TcpConn, TcpResult, service};
 pub use trace::{Field, Layer, LayerNote, LayerRole, Outcome, TraceEvent};
 pub use views::{
     ArpRow, InterfaceRow, MacRow, Neighbor, discovery_neighbors, interface_rows, natural_key,

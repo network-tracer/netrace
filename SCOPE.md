@@ -80,7 +80,7 @@ it acts on a packet in Simulation mode. Markers can be switched off per feature 
 | NAT / PAT | Inside / outside badges on the interfaces; the NAT router gets a small translation glyph | The packet visibly changes address at the router: old address struck through, new one highlighted; the inspector shows the translation table row it used |
 | ACLs | Shield badge on the interface and direction (in / out) where an ACL is applied | Permitted packets pass the shield; denied ones stop at it with the matching ACL line |
 | VLANs | Access ports and cables tinted by VLAN (with a legend); trunks drawn striped | Frames carry a VLAN tag colour; tagging / untagging is shown at trunk ports |
-| STP | Blocked ports shown with an amber bar across the link end; the root bridge gets a crown badge | BPDUs animate from the root; topology change shown as ports change state |
+| STP | Blocked ports shown with a red bar across the link end; the root bridge gets a gold ROOT badge (and a gold halo in the STP view) | BPDUs animate from the root; topology change shown as ports change state |
 | DHCP | Server and relay badges; pools listed in the inspector | DORA exchange stepped through, with the lease appearing on the PC |
 | OSPF | Areas outlined (from the config) and neighbour adjacencies drawn as a thin overlay | Hellos and LSAs animate; DR / BDR marked |
 | Routing | Hover a router to see its routes highlighted as paths on the diagram | The route that matched is named in the hop explanation |
@@ -270,7 +270,7 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
   interfaces trunk, mac address-table, spanning-tree, ip ospf neighbor/interface, cdp neighbors,
   ip dhcp binding, access-lists, ip nat translations, arp, port-security
 - `copy running-config startup-config`, `write`, `reload`
-- PC prompt: `ipconfig`, `ipconfig /renew`, `ping`, `tracert`, `arp -a`
+- PC prompt: `ipconfig`, `ipconfig /renew`, `ping`, `tracert`, `arp -a`, `curl`, `telnet`
 
 ## Signature feature 1: packet visualiser
 
@@ -325,8 +325,8 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | M2.5 ✅ | Canvas styling | Shapes (incl. *n*-sided polygons) with colours and interaction rules, device and note colours, distinct cable styles; smooth pinch / scroll zoom anchored at the pointer |
 | M3 ✅ | CLI + routing | IOS parser, router interfaces, static routes, traceroute, subinterfaces, SVIs; multi-line paste, config snippets, configs saved in the file, duplicate with variations. Subinterfaces and SVIs other than Vlan1 are configured and saved now and carry traffic once trunks arrive (M4) |
 | M4 ✅ | Switching | VLANs, trunks, STP, CDP/LLDP, port security; VLAN tinting and STP markers on the canvas; router-on-a-stick and SVI routing |
-| M5 | Services | DHCP ✅ (server, relay, APIPA, DORA in the trace) and ACLs ✅ (standard / extended, numbered / named, deciding line in the inspector, shield badges), NAT/PAT ✅ (static, pool, overload; before / after addresses and the rule in the inspector, inside / outside badges), OSPF ✅ (neighbours with mismatch reasons, DR / BDR election, LSDB, SPF with equal-cost paths, inter-area and default routes) |
-| M5.5 | Protocol views | STP view ✅ (roles, reasons, blocked ports, reconvergence when a link fails), OSPF view ✅ (router IDs, neighbours, elections, routes and why, LSDB, cost and DR / BDR labels on the canvas, link-failure replay), ACL / NAT / DHCP shown in the packet inspector ✅; still to do: OSPF hellos and LSAs as packets in the trace |
+| M5 ✅ | Services | Minimal TCP ✅ (handshake, one request and response, close; PC `curl` and `telnet`; extended ACL ports and PAT act on it), DHCP ✅ (server, relay, APIPA, DORA in the trace) and ACLs ✅ (standard / extended, numbered / named, deciding line in the inspector, shield badges), NAT/PAT ✅ (static, pool, overload; before / after addresses and the rule in the inspector, inside / outside badges), OSPF ✅ (neighbours with mismatch reasons, DR / BDR election, LSDB, SPF with equal-cost paths, inter-area and default routes) |
+| M5.5 | Protocol views | STP view ✅ (roles, reasons, blocked ports, reconvergence when a link fails), OSPF view ✅ (router IDs, neighbours, elections, routes and why, LSDB, cost and DR / BDR labels on the canvas, link-failure replay), ACL / NAT / DHCP shown in the packet inspector ✅; still to do: OSPF hellos and LSAs as packets in the trace, OSPF adjacencies drawn on the canvas, BPDUs in the visualiser, a VLAN view, the NAT router glyph and route paths on hover |
 | M6 | Labs + polish | Lab engine ✅ (checks on simulated state, live progress, per-check feedback, hints), 20 labs ✅ (each proven by a scripted solution, see LABS.md); still to do: locked items, performance pass, beta |
 
 ## Quality targets

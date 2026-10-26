@@ -360,6 +360,9 @@ impl Network {
             L4::Udp(udp) => {
                 return self.dhcp_receive(now, id, stack, own, arrival, frame, packet, udp);
             }
+            L4::Tcp(tcp) => {
+                return self.tcp_receive(now, id, stack, own, arrival, frame, packet, tcp);
+            }
         };
         let name = self.name(id);
         let port = abbreviate_port(&arrival.port);
@@ -515,6 +518,42 @@ impl Network {
                 }
             }
             IcmpKind::TimeExceeded | IcmpKind::Unreachable(_) => {
+                let prohibited = icmp.kind == IcmpKind::Unreachable(Unreachable::Prohibited);
+                if icmp.id == 0 && self.tcp_error(id, icmp.seq, packet.src, prohibited) {
+                    let reporter = self.who_ip(packet.src);
+                    let why = if prohibited {
+                        "an access list there stopped the connection attempt"
+                    } else {
+                        "it couldn't deliver the connection attempt"
+                    };
+                    let layers = vec![
+                        arrived,
+                        explain::data_link(LayerRole::Used, accepted, &frame),
+                        explain::ipv4(
+                            LayerRole::Used,
+                            format!("Addressed to {name}, from {}.", packet.src),
+                            &packet,
+                        ),
+                        explain::icmp(
+                            LayerRole::Used,
+                            "An error about one of this device's TCP segments.",
+                            &icmp,
+                        ),
+                    ];
+                    self.record(
+                        now,
+                        id,
+                        Some(&arrival),
+                        Some(frame),
+                        Outcome::Completed,
+                        format!(
+                            "{name} receives ICMP Destination Unreachable from {reporter}: {why}."
+                        ),
+                        layers,
+                        Vec::new(),
+                    );
+                    return;
+                }
                 let seq = icmp.seq;
                 let probe = session
                     .and_then(|s| self.sessions.get(s as usize))
@@ -907,6 +946,7 @@ impl Network {
         let what = match packet.l4 {
             L4::Icmp(_) => "packet",
             L4::Udp(_) => "DHCP packet",
+            L4::Tcp(_) => "TCP segment",
         };
         let summary = format!(
             "{name} checks access list {} {} on {} against the {what} from {} to {}. It matches {}, so the packet is \
@@ -1037,7 +1077,13 @@ impl Network {
         if original.is_icmp_error() {
             return;
         }
-        let (quoted_id, quoted_seq) = original.icmp().map(|i| (i.id, i.seq)).unwrap_or((0, 0));
+        // A TCP segment is quoted as ID 0 with its source port, so the
+        // client can tell which connection the error is about.
+        let (quoted_id, quoted_seq) = match original.l4 {
+            L4::Icmp(i) => (i.id, i.seq),
+            L4::Tcp(t) => (0, t.src_port),
+            L4::Udp(_) => (0, 0),
+        };
         let Some(src) = in_iface.address.map(|a| a.address).or_else(|| {
             stack
                 .resolve(original.src)
@@ -1429,6 +1475,16 @@ fn describe_packet(packet: &Ipv4Packet) -> String {
     let icmp = match packet.l4 {
         L4::Icmp(icmp) => icmp,
         L4::Udp(udp) => return format!("a DHCP {}", udp.dhcp.op.name()),
+        L4::Tcp(tcp) => {
+            let to = match crate::service(tcp.dst_port) {
+                "" => format!("port {}", tcp.dst_port),
+                s => format!("port {} ({s})", tcp.dst_port),
+            };
+            return match (tcp.flags.syn, tcp.flags.ack) {
+                (true, false) => format!("a TCP SYN to {to}, asking to open a connection"),
+                _ => format!("a TCP segment [{}]", tcp.flags.names()),
+            };
+        }
     };
     match icmp.kind {
         IcmpKind::EchoRequest => format!("ping {} (an ICMP echo request)", icmp.seq),
@@ -1442,6 +1498,7 @@ fn icmp_note(packet: &Ipv4Packet) -> String {
     let icmp = match packet.l4 {
         L4::Icmp(icmp) => icmp,
         L4::Udp(udp) => return format!("DHCP {}, relayed to the server.", udp.dhcp.op.name()),
+        L4::Tcp(tcp) => return format!("TCP [{}], carried along untouched.", tcp.flags.names()),
     };
     match icmp.kind {
         IcmpKind::EchoRequest => format!("Echo request number {}.", icmp.seq),

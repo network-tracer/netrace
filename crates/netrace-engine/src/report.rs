@@ -65,12 +65,45 @@ impl Network {
                     Err(e) => e.to_string(),
                 }
             }
+            [cmd, target] if cmd.eq_ignore_ascii_case("curl") => {
+                // curl [http://]ADDRESS[:PORT][/path]
+                let rest = target
+                    .strip_prefix("http://")
+                    .or_else(|| target.strip_prefix("HTTP://"))
+                    .unwrap_or(target);
+                let host_port = rest.split('/').next().unwrap_or(rest);
+                let (host, port) = match host_port.split_once(':') {
+                    Some((h, p)) => (h, p.parse().unwrap_or(80)),
+                    None => (host_port, 80),
+                };
+                let Ok(destination) = host.parse::<Ipv4Addr>() else {
+                    return format!("curl: (6) Could not resolve host: {host}");
+                };
+                match self.connect(device, destination, port, crate::TcpApp::Http, at) {
+                    Ok(conn) => self.connection_report(conn).unwrap_or_default(),
+                    Err(e) => e.to_string(),
+                }
+            }
+            [cmd, target, rest @ ..] if cmd.eq_ignore_ascii_case("telnet") && rest.len() <= 1 => {
+                let Ok(destination) = target.parse::<Ipv4Addr>() else {
+                    return format!(
+                        "Connecting To {target}...Could not open connection to the host"
+                    );
+                };
+                let port = rest.first().and_then(|p| p.parse().ok()).unwrap_or(23);
+                match self.connect(device, destination, port, crate::TcpApp::Connect, at) {
+                    Ok(conn) => self.connection_report(conn).unwrap_or_default(),
+                    Err(e) => e.to_string(),
+                }
+            }
             [cmd] if cmd.eq_ignore_ascii_case("help") || *cmd == "?" => "Commands:\n  \
                  ping [-n count] <address>   Send echo requests and show the replies\n  \
                  tracert <address>           List the routers on the way to an address\n  \
                  ipconfig                    Show this device's IP configuration\n  \
                  ipconfig /renew             Ask DHCP for an address again\n  \
-                 arp -a                      Show the ARP cache (IP-to-MAC entries)"
+                 arp -a                      Show the ARP cache (IP-to-MAC entries)\n  \
+                 curl <address>[:port]       Fetch a web page over TCP (port 80)\n  \
+                 telnet <address> [port]     Open a TCP connection (port 23)"
                 .into(),
             [cmd, ..] => format!(
                 "'{cmd}' is not recognized as a command.\nType help to see what this device understands."

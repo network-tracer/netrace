@@ -37,12 +37,12 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 | `ip default-gateway`, `ip routing`, `no switchport` | ✅ | | | |
 | `ip dhcp pool`, `network`, `default-router`, `dns-server`, `domain-name`, `ip dhcp excluded-address` | ✅ | | | No lease timers: leases last for the run |
 | `ip helper-address` | ✅ | | | Relays DHCP only |
-| `access-list N permit/deny/remark` (standard and extended), `ip access-list standard/extended NAME`, sequence numbers | ✅ | | | TCP lines parse but never match: no TCP traffic yet |
+| `access-list N permit/deny/remark` (standard and extended), `ip access-list standard/extended NAME`, sequence numbers | ✅ | | | TCP and UDP port matches act on real traffic (PC `curl` / `telnet`, DHCP) |
 | `ip access-group N in/out` | ✅ | | | |
 | `ip nat inside`, `ip nat outside` | ✅ | | | |
 | `ip nat pool NAME A B netmask M / prefix-length N` | ✅ | | | |
 | `ip nat inside source static L G` | ✅ | | | The router answers ARP for inside global addresses on the outside subnet, as IOS does |
-| `ip nat inside source list N pool P [overload]`, `... interface X [overload]` | ✅ | | | Inside source only; ICMP and UDP translated (no TCP yet); translations don't time out; no `clear ip nat translation` |
+| `ip nat inside source list N pool P [overload]`, `... interface X [overload]` | ✅ | | | Inside source only; ICMP, UDP and TCP translated; translations don't time out; no `clear ip nat translation` |
 | `router ospf N`: `network A W area N`, `router-id`, `passive-interface [default]`, `default-information originate`, `auto-cost reference-bandwidth` | ✅ | | | One process per router. Shown converged: a new `router-id` applies at once (IOS waits for `clear ip ospf process`) and a DR election runs as if all routers started together (IOS keeps an existing DR) |
 | `ip ospf cost / priority / hello-interval / dead-interval`, `ip ospf N area A`, `ip ospf network point-to-point` | ✅ | | | |
 | Multi-area (ABR summaries, `O IA`), `O*E2` default | ✅ | | | No stub / NSSA areas, no area ranges, no authentication, no MTU checks |
@@ -71,4 +71,5 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 |---|---|---|---|---|
 | `ping` (router: `!.U`, success rate; PC: Windows format) | ✅ | | | First packet dropped while ARP resolves, as on IOS |
 | `traceroute` / `tracert` | ✅ | | | ICMP probes on both (IOS really uses UDP) |
+| PC `curl <address>[:port]`, `telnet <address> [port]` | ✅ | | | One request and response over TCP, then close; servers listen on 21, 22, 23, 25, 80 and 443, routers and switches on 23; no remote shell |
 | `copy run start`, `write`, `erase startup-config`, `reload` with prompts | ✅ | | | |

@@ -2248,3 +2248,177 @@ fn the_ospf_lab_works_as_its_note_says() {
         "{changes:#?}"
     );
 }
+
+#[test]
+fn tcp_connects_and_extended_acls_match_ports() {
+    // PC1 (192.168.1.10) — Gi0/0 R1 Gi0/1 — SRV1 (192.168.2.10, a server).
+    let mut p = Project::new();
+    let r1 = p.add_device(DeviceKind::Router, Point::default()).id;
+    let pc1 = host(&mut p, "192.168.1.10", "192.168.1.1");
+    let srv = p.add_device(DeviceKind::Server, Point::default()).id;
+    p.set_host_ip(
+        srv,
+        Some(HostIp::new(ip("192.168.2.10"), 24, Some(ip("192.168.2.1"))).unwrap()),
+    )
+    .unwrap();
+    p.connect(
+        end(r1, "GigabitEthernet0/0"),
+        end(pc1, "FastEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        end(r1, "GigabitEthernet0/1"),
+        end(srv, "GigabitEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    router_port(&mut p, r1, "GigabitEthernet0/0", "192.168.1.1", 24);
+    router_port(&mut p, r1, "GigabitEthernet0/1", "192.168.2.1", 24);
+
+    let mut net = Network::new(p.clone());
+    let web = net
+        .connect(
+            pc1,
+            ip("192.168.2.10"),
+            80,
+            crate::TcpApp::Http,
+            SimTime::ZERO,
+        )
+        .unwrap();
+    let report = net.connection_report(web).unwrap();
+    assert!(report.contains("netrace web server"), "{report}");
+    let infos: Vec<String> = net
+        .trace()
+        .iter()
+        .filter_map(|e| e.frame.map(|f| f.info()))
+        .filter(|i| i.contains("→"))
+        .collect();
+    for flags in ["[SYN]", "[SYN, ACK]", "[ACK]", "[PSH, ACK]", "[FIN, ACK]"] {
+        assert!(
+            infos.iter().any(|i| i.contains(flags)),
+            "{flags} missing: {infos:#?}"
+        );
+    }
+    assert!(infos.iter().any(|i| i.contains("GET / HTTP/1.1")));
+    assert!(
+        net.trace()
+            .iter()
+            .any(|e| e.summary.contains("three-way handshake"))
+    );
+
+    // A closed port is refused; a PC doesn't listen at all.
+    let closed = net
+        .connect(
+            pc1,
+            ip("192.168.2.10"),
+            8080,
+            crate::TcpApp::Http,
+            SimTime::from_secs(20),
+        )
+        .unwrap();
+    assert!(
+        net.connection_report(closed)
+            .unwrap()
+            .contains("Connection refused")
+    );
+
+    // An extended ACL that denies HTTP (and permits the rest) stops the web
+    // request but not a telnet to the same server.
+    acl(
+        &mut p,
+        r1,
+        AccessList {
+            name: "110".into(),
+            kind: AclKind::Extended,
+            entries: vec![
+                AclEntry {
+                    sequence: 10,
+                    action: AclAction::Deny,
+                    protocol: AclProtocol::Tcp,
+                    source: AclAddress::ANY,
+                    source_port: None,
+                    destination: AclAddress::host(ip("192.168.2.10")),
+                    destination_port: Some(netrace_doc::PortMatch::Eq(80)),
+                    icmp: None,
+                },
+                entry(
+                    20,
+                    AclAction::Permit,
+                    AclProtocol::Ip,
+                    AclAddress::ANY,
+                    AclAddress::ANY,
+                    None,
+                ),
+            ],
+            remarks: vec![],
+        },
+        "GigabitEthernet0/0",
+        true,
+    );
+    let mut net = Network::new(p);
+    let web = net
+        .connect(
+            pc1,
+            ip("192.168.2.10"),
+            80,
+            crate::TcpApp::Http,
+            SimTime::ZERO,
+        )
+        .unwrap();
+    let report = net.connection_report(web).unwrap();
+    assert!(report.contains("access list"), "{report}");
+    let telnet = net
+        .connect(
+            pc1,
+            ip("192.168.2.10"),
+            23,
+            crate::TcpApp::Connect,
+            SimTime::from_secs(20),
+        )
+        .unwrap();
+    assert!(
+        net.connection_report(telnet)
+            .unwrap()
+            .contains("Connected to 192.168.2.10 port 23")
+    );
+    assert_eq!(net.acl_hits(r1).get(&("110".to_string(), 10)), Some(&1));
+}
+
+#[test]
+fn pat_translates_tcp_ports() {
+    let (mut p, r1, _, [pc1, ..], server) = nat_lab();
+    nat(
+        &mut p,
+        r1,
+        vec![NatRule::Dynamic {
+            acl: "1".into(),
+            target: NatTarget::Interface("GigabitEthernet0/1".into()),
+            overload: true,
+        }],
+        vec![],
+    );
+    // The lab's "server" is a PC; make it listen by asking for Telnet on a router instead.
+    let _ = server;
+    let mut net = Network::new(p);
+    let conn = net
+        .connect(
+            pc1,
+            ip("203.0.113.2"),
+            23,
+            crate::TcpApp::Connect,
+            SimTime::ZERO,
+        )
+        .unwrap();
+    let report = net.connection_report(conn).unwrap();
+    assert!(
+        report.contains("Connected to 203.0.113.2 port 23"),
+        "{report}"
+    );
+    let tcp = net
+        .nat_translations(r1)
+        .into_iter()
+        .find(|e| e.proto == Some(crate::NatProto::Tcp))
+        .expect("a TCP translation");
+    assert_eq!(tcp.inside_global(), "203.0.113.1:49152");
+}
