@@ -722,3 +722,254 @@ impl Simulation {
         badges
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfIfaceInfo {
+    pub name: String,
+    /// The physical port the interface uses (for canvas labels).
+    pub port: String,
+    /// "10.0.12.1/24".
+    pub address: String,
+    pub area: u32,
+    pub cost: u32,
+    /// "DR", "BDR", "DROTH", "P2P", "LOOP" or "WAIT".
+    pub state: String,
+    pub passive: bool,
+    /// Why it's in OSPF.
+    pub why: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfNeighborInfo {
+    pub device_id: u64,
+    pub router_id: String,
+    /// "FULL", "2WAY" or "DOWN".
+    pub state: String,
+    /// The neighbour's role: "DR", "BDR", "DROTHER" or "-".
+    pub role: String,
+    pub iface: String,
+    pub their_iface: String,
+    pub problem: Option<String>,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfRouteInfo {
+    /// "10.0.3.0/24".
+    pub prefix: String,
+    /// "O", "O IA" or "O*E2".
+    pub code: String,
+    pub cost: u32,
+    /// "10.0.12.2 via Gi0/1", one per equal-cost path.
+    pub next_hops: Vec<String>,
+    pub path: Vec<String>,
+    pub reason: String,
+    pub alternatives: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfRouterInfo {
+    pub device_id: u64,
+    pub router_id: Option<String>,
+    pub router_id_reason: String,
+    pub abr: bool,
+    pub asbr: bool,
+    pub interfaces: Vec<OspfIfaceInfo>,
+    pub neighbors: Vec<OspfNeighborInfo>,
+    pub routes: Vec<OspfRouteInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, uniffi::Record)]
+pub struct OspfMember {
+    pub device_id: u64,
+    pub iface: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfSegmentInfo {
+    /// "10.0.0.0/24".
+    pub network: String,
+    pub members: Vec<OspfMember>,
+    pub dr: Option<OspfMember>,
+    pub bdr: Option<OspfMember>,
+    pub election: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfLsaInfo {
+    /// "Router", "Network", "Summary" or "External".
+    pub kind: String,
+    pub link_id: String,
+    pub adv_router: String,
+    pub describe: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfAreaInfo {
+    pub area: u32,
+    pub lsas: Vec<OspfLsaInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfView {
+    pub routers: Vec<OspfRouterInfo>,
+    pub segments: Vec<OspfSegmentInfo>,
+    pub areas: Vec<OspfAreaInfo>,
+    pub external: Vec<OspfLsaInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfChangeInfo {
+    pub device_id: u64,
+    /// The route that changed ("10.0.3.0/24"); `None` for a lost neighbour.
+    pub prefix: Option<String>,
+    pub explanation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct OspfFailure {
+    pub after: OspfView,
+    pub changes: Vec<OspfChangeInfo>,
+}
+
+fn lsa_info(l: &engine::Lsa) -> OspfLsaInfo {
+    OspfLsaInfo {
+        kind: match l.kind {
+            engine::LsaKind::Router => "Router",
+            engine::LsaKind::Network => "Network",
+            engine::LsaKind::Summary => "Summary",
+            engine::LsaKind::External => "External",
+        }
+        .into(),
+        link_id: l.link_id.to_string(),
+        adv_router: l.adv_router.to_string(),
+        describe: l.describe.clone(),
+    }
+}
+
+fn ospf_view(ospf: &engine::Ospf, project: &doc::Project) -> OspfView {
+    let port_of = |id: doc::DeviceId, name: &str| {
+        let kind = project.device(id).map(|d| d.kind);
+        match kind {
+            // A switch's Vlan interface has no one port.
+            Some(k) if k.is_switch() && name.starts_with("Vlan") => String::new(),
+            _ => name.split('.').next().unwrap_or(name).to_string(),
+        }
+    };
+    let member = |(id, iface): &(doc::DeviceId, String)| OspfMember {
+        device_id: id.0,
+        iface: iface.clone(),
+    };
+    OspfView {
+        routers: ospf
+            .routers
+            .values()
+            .map(|r| OspfRouterInfo {
+                device_id: r.device.0,
+                router_id: r.router_id.map(|x| x.to_string()),
+                router_id_reason: r.router_id_reason.clone(),
+                abr: r.abr,
+                asbr: r.asbr,
+                interfaces: r
+                    .ifaces
+                    .iter()
+                    .map(|i| OspfIfaceInfo {
+                        name: i.name.clone(),
+                        port: port_of(r.device, &i.name),
+                        address: format!("{}/{}", i.address, i.prefix_len),
+                        area: i.area,
+                        cost: i.cost,
+                        state: i.state.ios().into(),
+                        passive: i.passive,
+                        why: i.why.clone(),
+                    })
+                    .collect(),
+                neighbors: r
+                    .neighbors
+                    .iter()
+                    .map(|n| OspfNeighborInfo {
+                        device_id: n.device.0,
+                        router_id: n.router_id.to_string(),
+                        state: n.state.ios().into(),
+                        role: n.role.into(),
+                        iface: n.iface.clone(),
+                        their_iface: n.their_iface.clone(),
+                        problem: n.problem.clone(),
+                        reason: n.reason.clone(),
+                    })
+                    .collect(),
+                routes: r
+                    .routes
+                    .iter()
+                    .map(|x| OspfRouteInfo {
+                        prefix: format!("{}/{}", x.network, x.prefix_len),
+                        code: match x.kind {
+                            engine::OspfRouteKind::Intra => "O",
+                            engine::OspfRouteKind::Inter => "O IA",
+                            engine::OspfRouteKind::External2 => "O*E2",
+                        }
+                        .into(),
+                        cost: x.cost,
+                        next_hops: x
+                            .next_hops
+                            .iter()
+                            .map(|(nh, i)| format!("{nh} via {}", engine::abbreviate_port(i)))
+                            .collect(),
+                        path: x.path.clone(),
+                        reason: x.reason.clone(),
+                        alternatives: x.alternatives.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        segments: ospf
+            .segments
+            .iter()
+            .filter(|s| s.members.len() > 1)
+            .map(|s| OspfSegmentInfo {
+                network: format!("{}/{}", s.network, s.prefix_len),
+                members: s.members.iter().map(member).collect(),
+                dr: s.dr.as_ref().map(member),
+                bdr: s.bdr.as_ref().map(member),
+                election: s.election.clone(),
+            })
+            .collect(),
+        areas: ospf
+            .lsdb
+            .iter()
+            .map(|(area, lsas)| OspfAreaInfo {
+                area: *area,
+                lsas: lsas.iter().map(lsa_info).collect(),
+            })
+            .collect(),
+        external: ospf.external.iter().map(lsa_info).collect(),
+    }
+}
+
+#[uniffi::export]
+impl Simulation {
+    /// OSPF in its converged state: routers, neighbours, elections, the
+    /// link-state database and the routes chosen, each with its reason.
+    pub fn ospf_view(&self) -> OspfView {
+        let network = self.lock();
+        ospf_view(network.ospf(), network.project())
+    }
+
+    /// What OSPF does if `link_id` fails (the project isn't changed).
+    pub fn ospf_link_failure(&self, link_id: u64) -> OspfFailure {
+        let network = self.lock();
+        let (after, changes) =
+            engine::Ospf::after_link_failure(network.project(), doc::LinkId(link_id));
+        OspfFailure {
+            after: ospf_view(&after, network.project()),
+            changes: changes
+                .into_iter()
+                .map(|c| OspfChangeInfo {
+                    device_id: c.device.0,
+                    prefix: c.network.map(|(n, l)| format!("{n}/{l}")),
+                    explanation: c.explanation,
+                })
+                .collect(),
+        }
+    }
+}

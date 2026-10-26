@@ -8,6 +8,7 @@
 
 mod grammar;
 mod iface;
+mod ospf;
 mod render;
 mod services;
 mod switching;
@@ -61,6 +62,8 @@ pub(crate) enum Mode {
     DhcpPool(String),
     /// `ip access-list standard|extended NAME`.
     Acl(String, netrace_doc::AclKind),
+    /// `router ospf N`.
+    RouterOspf(u16),
 }
 
 /// A question waiting for the next line.
@@ -110,6 +113,7 @@ impl Session {
             Mode::Vlan(_) => Ctx::Vlan,
             Mode::DhcpPool(_) => Ctx::DhcpPool,
             Mode::Acl(..) => Ctx::Acl,
+            Mode::RouterOspf(_) => Ctx::Router,
         }
     }
 
@@ -163,6 +167,7 @@ impl Session {
             Mode::DhcpPool(_) => format!("{name}(dhcp-config)#"),
             Mode::Acl(_, netrace_doc::AclKind::Standard) => format!("{name}(config-std-nacl)#"),
             Mode::Acl(_, netrace_doc::AclKind::Extended) => format!("{name}(config-ext-nacl)#"),
+            Mode::RouterOspf(_) => format!("{name}(config-router)#"),
             Mode::Line(_) => format!("{name}(config-line)#"),
         }
     }
@@ -851,6 +856,7 @@ impl Session {
                     Some(out) => out,
                     None => self
                         .services(other, values, line, kind, project, network)
+                        .or_else(|| self.ospf(other, values, kind, project, network))
                         .unwrap_or_else(|| format!("% {other} is not available yet.")),
                 }
             }

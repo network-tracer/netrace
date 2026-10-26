@@ -44,6 +44,11 @@ struct WorkspaceCommands: Commands {
                 set: { workspace?.showSpanningTree($0) }
             ))
             .keyboardShortcut("s", modifiers: [.command, .option])
+            Toggle("OSPF View", isOn: Binding(
+                get: { workspace?.showsOspf ?? false },
+                set: { workspace?.showOspf($0) }
+            ))
+            .keyboardShortcut("o", modifiers: [.command, .option])
             Toggle("Snap to Items", isOn: Binding(
                 get: { workspace?.snapsToItems ?? false },
                 set: { workspace?.snapsToItems = $0 }

@@ -113,7 +113,7 @@ final class WorkspaceModel: ObservableObject {
     /// instructions stay visible next to the console in the bottom panel.
     enum RightPane: String, CaseIterable, Identifiable {
         /// The STP pane also turns on the spanning-tree view of the canvas.
-        case inspector, lab, spanningTree
+        case inspector, lab, spanningTree, ospf
         var id: Self { self }
 
         var title: String {
@@ -121,6 +121,7 @@ final class WorkspaceModel: ObservableObject {
             case .inspector: "Inspector"
             case .lab: "Lab"
             case .spanningTree: "STP"
+            case .ospf: "OSPF"
             }
         }
 
@@ -129,6 +130,7 @@ final class WorkspaceModel: ObservableObject {
             case .inspector: .system("slider.horizontal.3")
             case .lab: .custom(.lab)
             case .spanningTree: .system("point.3.connected.trianglepath.dotted")
+            case .ospf: .system("arrow.triangle.branch")
             }
         }
     }
@@ -216,6 +218,30 @@ final class WorkspaceModel: ObservableObject {
         showSpanningTree(true)
         stpFailedLink = id
         stpStep = 0
+    }
+
+    /// OSPF view: a link failure being replayed.
+    @Published var ospfFailedLink: UInt64?
+    @Published var ospfStep = 0
+
+    var showsOspf: Bool { showsInspector && rightPane == .ospf }
+
+    func showOspf(_ on: Bool) {
+        if on {
+            rightPane = .ospf
+            showsInspector = true
+        } else if rightPane == .ospf {
+            rightPane = .inspector
+        }
+        ospfFailedLink = nil
+        ospfStep = 0
+    }
+
+    /// Replays what OSPF does when this cable fails (the project isn't changed).
+    func failOspfLink(_ id: UInt64) {
+        showOspf(true)
+        ospfFailedLink = id
+        ospfStep = 0
     }
     @Published var librarySearch = ""
     @Published var topologySearch = ""

@@ -206,6 +206,7 @@ impl Network {
                 next_hop: None,
                 iface: s.ifaces[0].name.clone(),
                 distance: 0,
+                metric: 0,
             });
         }
         self.dhcp_clients.remove(&host);
@@ -330,6 +331,7 @@ impl Network {
                             next_hop: None,
                             iface: iface_name.clone(),
                             distance: 0,
+                            metric: 0,
                         }];
                         if let Some(gw) = d.router {
                             s.routes.push(Route {
@@ -339,6 +341,7 @@ impl Network {
                                 next_hop: Some(gw),
                                 iface: iface_name,
                                 distance: 1,
+                                metric: 0,
                             });
                         }
                     }

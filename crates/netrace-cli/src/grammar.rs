@@ -29,6 +29,8 @@ pub enum Ctx {
     DhcpPool,
     /// `R1(config-std-nacl)#` / `R1(config-ext-nacl)#`
     Acl,
+    /// `R1(config-router)#`
+    Router,
 }
 
 impl Ctx {
@@ -44,6 +46,8 @@ pub(crate) enum Devices {
     Router,
     Switch,
     L3Switch,
+    /// Routers and layer 3 switches.
+    Routing,
 }
 
 impl Devices {
@@ -53,6 +57,7 @@ impl Devices {
             Devices::Router => kind == DeviceKind::Router,
             Devices::Switch => kind.is_switch(),
             Devices::L3Switch => kind == DeviceKind::L3Switch,
+            Devices::Routing => kind == DeviceKind::Router || kind == DeviceKind::L3Switch,
         }
     }
 }
@@ -76,9 +81,27 @@ const CONFIG: &[Ctx] = &[Config];
 const IF: &[Ctx] = &[Interface, Subinterface];
 const SUBIF: &[Ctx] = &[Subinterface];
 const LINE: &[Ctx] = &[Line];
-const CONFIG_ANY: &[Ctx] = &[Config, Interface, Subinterface, Line, Vlan, DhcpPool, Acl];
+const CONFIG_ANY: &[Ctx] = &[
+    Config,
+    Interface,
+    Subinterface,
+    Line,
+    Vlan,
+    DhcpPool,
+    Acl,
+    Router,
+];
 /// Global configuration commands that also work from sub-modes (`interface`, `line`, `vlan`).
-const CONFIG_NAV: &[Ctx] = &[Config, Interface, Subinterface, Line, Vlan, DhcpPool, Acl];
+const CONFIG_NAV: &[Ctx] = &[
+    Config,
+    Interface,
+    Subinterface,
+    Line,
+    Vlan,
+    DhcpPool,
+    Acl,
+    Router,
+];
 const SWITCHPORT: &[Ctx] = &[Interface];
 
 macro_rules! cmd {
@@ -190,6 +213,43 @@ pub(crate) const COMMANDS: &[Command] = &[
         "show port-security address",
         EXEC,
         Devices::Switch
+    ),
+    cmd!(
+        "show-ospf-neighbor",
+        "show ip ospf neighbor [detail]",
+        EXEC,
+        Devices::Routing
+    ),
+    cmd!(
+        "show-ospf-interface-brief",
+        "show ip ospf interface brief",
+        EXEC,
+        Devices::Routing
+    ),
+    cmd!(
+        "show-ospf-interface",
+        "show ip ospf interface [IFACE]",
+        EXEC,
+        Devices::Routing
+    ),
+    cmd!(
+        "show-ospf-database",
+        "show ip ospf database",
+        EXEC,
+        Devices::Routing
+    ),
+    cmd!("show-ospf", "show ip ospf", EXEC, Devices::Routing),
+    cmd!(
+        "show-ip-protocols",
+        "show ip protocols",
+        EXEC,
+        Devices::Routing
+    ),
+    cmd!(
+        "show-ip-route-ospf",
+        "show ip route ospf",
+        EXEC,
+        Devices::Routing
     ),
     cmd!(
         "show-nat-translations",
@@ -819,6 +879,162 @@ pub(crate) const COMMANDS: &[Command] = &[
         Devices::Any,
         &["Comment up to 100 characters"]
     ),
+    // OSPF
+    cmd!(
+        "router-ospf",
+        "router ospf <1-65535>",
+        CONFIG_NAV,
+        Devices::Routing,
+        &["Process ID"]
+    ),
+    cmd!(
+        "no-router-ospf",
+        "no router ospf <1-65535>",
+        CONFIG,
+        Devices::Routing,
+        &["Process ID"]
+    ),
+    cmd!(
+        "ospf-network",
+        "network A.B.C.D A.B.C.D area <0-4294967295>",
+        &[Router],
+        Devices::Routing,
+        &[
+            "Network number",
+            "OSPF wild card bits",
+            "OSPF area ID as a decimal value"
+        ]
+    ),
+    cmd!(
+        "no-ospf-network",
+        "no network A.B.C.D A.B.C.D area <0-4294967295>",
+        &[Router],
+        Devices::Routing,
+        &[
+            "Network number",
+            "OSPF wild card bits",
+            "OSPF area ID as a decimal value"
+        ]
+    ),
+    cmd!(
+        "ospf-router-id",
+        "router-id A.B.C.D",
+        &[Router],
+        Devices::Routing,
+        &["OSPF router-id in IP address format"]
+    ),
+    cmd!(
+        "no-ospf-router-id",
+        "no router-id [A.B.C.D]",
+        &[Router],
+        Devices::Routing,
+        &["OSPF router-id in IP address format"]
+    ),
+    cmd!(
+        "ospf-passive-default",
+        "passive-interface default",
+        &[Router],
+        Devices::Routing
+    ),
+    cmd!(
+        "no-ospf-passive-default",
+        "no passive-interface default",
+        &[Router],
+        Devices::Routing
+    ),
+    cmd!(
+        "ospf-passive",
+        "passive-interface IFACE",
+        &[Router],
+        Devices::Routing,
+        &["Interface to suppress routing updates on"]
+    ),
+    cmd!(
+        "no-ospf-passive",
+        "no passive-interface IFACE",
+        &[Router],
+        Devices::Routing,
+        &["Interface to send routing updates on"]
+    ),
+    cmd!(
+        "ospf-default-originate",
+        "default-information originate",
+        &[Router],
+        Devices::Routing
+    ),
+    cmd!(
+        "no-ospf-default-originate",
+        "no default-information originate",
+        &[Router],
+        Devices::Routing
+    ),
+    cmd!(
+        "ospf-ref-bw",
+        "auto-cost reference-bandwidth <1-4294967>",
+        &[Router],
+        Devices::Routing,
+        &["The reference bandwidth in terms of Mbits per second"]
+    ),
+    cmd!(
+        "no-ospf-ref-bw",
+        "no auto-cost reference-bandwidth [LINE]",
+        &[Router],
+        Devices::Routing
+    ),
+    cmd!(
+        "if-ospf-cost",
+        "ip ospf cost <1-65535>",
+        IF,
+        Devices::Routing,
+        &["Cost"]
+    ),
+    cmd!(
+        "if-ospf-priority",
+        "ip ospf priority <0-255>",
+        IF,
+        Devices::Routing,
+        &["Priority"]
+    ),
+    cmd!(
+        "if-ospf-hello",
+        "ip ospf hello-interval <1-65535>",
+        IF,
+        Devices::Routing,
+        &["Seconds"]
+    ),
+    cmd!(
+        "if-ospf-dead",
+        "ip ospf dead-interval <1-65535>",
+        IF,
+        Devices::Routing,
+        &["Seconds"]
+    ),
+    cmd!(
+        "if-ospf-area",
+        "ip ospf <1-65535> area <0-4294967295>",
+        IF,
+        Devices::Routing,
+        &["Process ID", "OSPF area ID as a decimal value"]
+    ),
+    cmd!(
+        "if-ospf-p2p",
+        "ip ospf network point-to-point",
+        IF,
+        Devices::Routing
+    ),
+    cmd!(
+        "if-ospf-broadcast",
+        "ip ospf network broadcast",
+        IF,
+        Devices::Routing
+    ),
+    cmd!(
+        "no-if-ospf",
+        "no ip ospf LINE",
+        IF,
+        Devices::Routing,
+        &["OSPF interface setting to remove"]
+    ),
     // NAT
     cmd!("nat-side", "ip nat inside", IF, Devices::Router),
     cmd!("nat-side", "ip nat outside", IF, Devices::Router),
@@ -1045,6 +1261,22 @@ pub(crate) fn keyword_help(keyword: &str, ctx: Ctx) -> &'static str {
         "remark" => "Access list entry comment",
         "in" => "inbound packets",
         "nat" => "NAT configuration commands / IP NAT information",
+        "ospf" => "Open Shortest Path First (OSPF)",
+        "router-id" => "router-id for this OSPF process",
+        "area" => "Set the OSPF area ID",
+        "passive-interface" => "Suppress routing updates on an interface",
+        "default-information" => "Control distribution of default information",
+        "originate" => "Distribute a default route",
+        "auto-cost" => "Calculate OSPF interface cost according to bandwidth",
+        "reference-bandwidth" => "Use reference bandwidth method to assign OSPF cost",
+        "cost" => "Interface cost",
+        "hello-interval" => "Time between HELLO packets",
+        "dead-interval" => "Interval after which a neighbor is declared dead",
+        "point-to-point" => "Specify OSPF point-to-point network",
+        "broadcast" => "Specify OSPF broadcast multi-access network",
+        "neighbor" => "Neighbor list",
+        "database" => "Database summary",
+        "protocols" => "IP routing protocol process parameters and statistics",
         "inside" => "Inside address translation / Inside interface for address translation",
         "outside" => "Outside interface for address translation",
         "source" => "Source address translation",

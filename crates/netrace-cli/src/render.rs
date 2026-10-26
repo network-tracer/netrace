@@ -224,11 +224,59 @@ pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig
         if let Some(side) = iface.nat {
             let _ = writeln!(out, " ip nat {}", side.ios());
         }
+        let ospf = &iface.ospf;
+        if let Some((pid, area)) = ospf.area {
+            let _ = writeln!(out, " ip ospf {pid} area {area}");
+        }
+        if let Some(cost) = ospf.cost {
+            let _ = writeln!(out, " ip ospf cost {cost}");
+        }
+        if let Some(priority) = ospf.priority {
+            let _ = writeln!(out, " ip ospf priority {priority}");
+        }
+        if let Some(hello) = ospf.hello {
+            let _ = writeln!(out, " ip ospf hello-interval {hello}");
+        }
+        if let Some(dead) = ospf.dead {
+            let _ = writeln!(out, " ip ospf dead-interval {dead}");
+        }
+        if ospf.point_to_point {
+            out += " ip ospf network point-to-point\n";
+        }
         if router && kind.has_port(&name) {
             out += " duplex auto\n speed auto\n";
         }
         if iface.shutdown {
             out += " shutdown\n";
+        }
+        out += "!\n";
+    }
+    for p in &config.ospf {
+        let _ = writeln!(out, "router ospf {}", p.process_id);
+        if let Some(rid) = p.router_id {
+            let _ = writeln!(out, " router-id {rid}");
+        }
+        if p.reference_bandwidth != 100 {
+            let _ = writeln!(
+                out,
+                " auto-cost reference-bandwidth {}",
+                p.reference_bandwidth
+            );
+        }
+        if p.passive_default {
+            out += " passive-interface default\n";
+            for a in &p.active {
+                let _ = writeln!(out, " no passive-interface {a}");
+            }
+        }
+        for name in &p.passive {
+            let _ = writeln!(out, " passive-interface {name}");
+        }
+        for n in &p.networks {
+            let _ = writeln!(out, " network {} {} area {}", n.address, n.wildcard, n.area);
+        }
+        if p.default_originate {
+            out += " default-information originate\n";
         }
         out += "!\n";
     }
@@ -430,13 +478,23 @@ fn classful_prefix(ip: Ipv4Addr) -> u8 {
 
 fn route_line(route: &Route, indent: bool) -> String {
     let star = if route.is_default() { "*" } else { "" };
-    let code = format!("{}{star}", route.source.code());
+    let code = match route.source {
+        RouteSource::OspfInterArea => format!("O{star} IA"),
+        RouteSource::OspfExternal2 => format!("O{star}E2"),
+        source => format!("{}{star}", source.code()),
+    };
     let pad = if indent { 9 } else { 6 };
     let target = match (route.source, route.next_hop) {
         (RouteSource::Connected | RouteSource::Local, _) | (_, None) => {
             format!("is directly connected, {}", route.iface)
         }
-        (_, Some(nh)) => format!("[{}/0] via {nh}", route.distance),
+        (RouteSource::Ospf | RouteSource::OspfInterArea | RouteSource::OspfExternal2, Some(nh)) => {
+            format!(
+                "[{}/{}] via {nh}, 00:00:12, {}",
+                route.distance, route.metric, route.iface
+            )
+        }
+        (_, Some(nh)) => format!("[{}/{}] via {nh}", route.distance, route.metric),
     };
     format!(
         "{code:<pad$}{}/{} {target}",
@@ -482,9 +540,8 @@ pub(crate) fn ip_route(kind: DeviceKind, config: &DeviceConfig, routes: &[Route]
         None => out += "Gateway of last resort is not set\n\n",
     }
     // Defaults first, then grouped by classful network as IOS does.
-    for r in routes.iter().filter(|r| r.is_default()) {
-        let _ = writeln!(out, "{}", route_line(r, false));
-    }
+    let defaults: Vec<&Route> = routes.iter().filter(|r| r.is_default()).collect();
+    out += &route_lines(&defaults, false);
     let mut groups: Vec<(Ipv4Addr, u8, Vec<&Route>)> = Vec::new();
     for r in routes.iter().filter(|r| !r.is_default()) {
         let len = classful_prefix(r.network);
@@ -495,14 +552,17 @@ pub(crate) fn ip_route(kind: DeviceKind, config: &DeviceConfig, routes: &[Route]
         }
     }
     for (major, len, members) in groups {
-        if members.len() == 1 && members[0].prefix_len == len {
-            let _ = writeln!(out, "{}", route_line(members[0], false));
+        let mut prefixes: Vec<(Ipv4Addr, u8)> =
+            members.iter().map(|r| (r.network, r.prefix_len)).collect();
+        prefixes.dedup();
+        if prefixes.len() == 1 && members[0].prefix_len == len {
+            out += &route_lines(&members, false);
             continue;
         }
         let mut masks: Vec<u8> = members.iter().map(|r| r.prefix_len).collect();
         masks.sort_unstable();
         masks.dedup();
-        let subnets = members.len();
+        let subnets = prefixes.len();
         let plural = if subnets == 1 { "" } else { "s" };
         if masks.len() == 1 {
             let _ = writeln!(
@@ -516,9 +576,30 @@ pub(crate) fn ip_route(kind: DeviceKind, config: &DeviceConfig, routes: &[Route]
                 masks.len()
             );
         }
-        for r in members {
-            let _ = writeln!(out, "{}", route_line(r, true));
+        out += &route_lines(&members, true);
+    }
+    out
+}
+
+/// Route lines; a second equal-cost path to the same prefix continues on
+/// the next line under the first, as IOS prints it.
+fn route_lines(routes: &[&Route], indent: bool) -> String {
+    let mut out = String::new();
+    let mut previous: Option<&Route> = None;
+    for r in routes {
+        let line = route_line(r, indent);
+        match previous {
+            Some(p)
+                if (p.network, p.prefix_len, p.source) == (r.network, r.prefix_len, r.source) =>
+            {
+                let at = line.find('[').unwrap_or(0);
+                let _ = writeln!(out, "{}{}", " ".repeat(at), &line[at..]);
+            }
+            _ => {
+                let _ = writeln!(out, "{line}");
+            }
         }
+        previous = Some(r);
     }
     out
 }

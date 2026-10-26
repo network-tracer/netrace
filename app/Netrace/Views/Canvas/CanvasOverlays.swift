@@ -414,6 +414,9 @@ struct LinkContextMenu: View {
             workspace.failLink(link.id)
         }
         .disabled(!(document.device(link.a.deviceId)?.kind.isSwitch ?? false) || !(document.device(link.b.deviceId)?.kind.isSwitch ?? false))
+        Button("Fail Link (OSPF View)", systemImage: "bolt.horizontal.circle") {
+            workspace.failOspfLink(link.id)
+        }
         Button("Link Conditioning…", systemImage: "slider.horizontal.3") {
             workspace.selectLink(link.id)
             workspace.showsInspector = true

@@ -268,7 +268,7 @@ struct RoleBadge: View {
 }
 
 /// A rounded sunken box for grouped content in narrow panes.
-private struct InspectorBox<Content: View>: View {
+struct InspectorBox<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {

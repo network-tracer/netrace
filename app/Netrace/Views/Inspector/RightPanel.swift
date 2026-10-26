@@ -21,6 +21,7 @@ struct RightPanel: View {
             case .inspector: InspectorPanel(document: document, workspace: workspace)
             case .lab: LabPanel(workspace: workspace)
             case .spanningTree: SpanningTreePanel(document: document, workspace: workspace)
+            case .ospf: OspfPanel(document: document, workspace: workspace)
             }
         }
         .background(Theme.Palette.surface)

@@ -17,6 +17,7 @@ mod frame;
 mod mac;
 mod nat;
 mod network;
+mod ospf;
 mod probe;
 mod report;
 mod routing;
@@ -37,6 +38,10 @@ pub use frame::{
 pub use mac::MacAddr;
 pub use nat::{NatDecision, NatDirection, NatEntry, NatKind, NatProto};
 pub use network::{EngineError, HOP_LATENCY, Network};
+pub use ospf::{
+    Lsa, LsaKind, NeighborState, OSPF_DISTANCE, Ospf, OspfChange, OspfIfState, OspfIface,
+    OspfNeighbor, OspfNetType, OspfRoute, OspfRouteKind, OspfRouter, OspfSegment,
+};
 pub use probe::{
     MAX_HOPS, PROBES_PER_HOP, PingFailure, PingSession, Probe, ProbeResult, ReportStyle,
     SessionKind,

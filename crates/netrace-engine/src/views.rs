@@ -36,7 +36,7 @@ pub fn interface_rows(project: &Project, id: DeviceId) -> Vec<InterfaceRow> {
         return Vec::new();
     };
     let (ports, l2) = crate::stp::analyse(project);
-    let stack = Stack::build(project, id, &ports, &l2);
+    let stack = Stack::build_base(project, id, &ports, &l2);
     let mac_of = |name: &str| {
         stack
             .as_ref()
@@ -126,7 +126,7 @@ fn vlan1_row(
     let config = d.config.interface(d.kind, "Vlan1");
     let _ = ports;
     let (ports_check, l2) = crate::stp::analyse(project);
-    let any_up = Stack::build(project, id, &ports_check, &l2)
+    let any_up = Stack::build_base(project, id, &ports_check, &l2)
         .and_then(|s| s.iface("Vlan1").map(|i| i.up))
         .unwrap_or(false);
     let (status, protocol) = match (config.shutdown, any_up) {
@@ -309,6 +309,12 @@ impl Network {
     /// ones that needed a new one.
     pub fn nat_hits(&self, id: DeviceId) -> (u32, u32) {
         self.nat_hits.get(&id).copied().unwrap_or_default()
+    }
+
+    /// OSPF as the simulation uses it: neighbours, elections, databases
+    /// and the routes chosen, each with its reason.
+    pub fn ospf(&self) -> &crate::Ospf {
+        &self.ospf
     }
 
     /// VLAN membership and spanning tree as the simulation uses them.

@@ -90,6 +90,12 @@ pub enum RouteSource {
     Static,
     /// An end device's default gateway, or a switch's `ip default-gateway`.
     Gateway,
+    /// `O`: OSPF, inside the area.
+    Ospf,
+    /// `O IA`: OSPF, from another area.
+    OspfInterArea,
+    /// `O E2`: OSPF external type 2.
+    OspfExternal2,
 }
 
 impl RouteSource {
@@ -98,6 +104,7 @@ impl RouteSource {
             RouteSource::Connected => "C",
             RouteSource::Local => "L",
             RouteSource::Static | RouteSource::Gateway => "S",
+            RouteSource::Ospf | RouteSource::OspfInterArea | RouteSource::OspfExternal2 => "O",
         }
     }
 }
@@ -112,6 +119,8 @@ pub struct Route {
     /// Exit interface (full name).
     pub iface: String,
     pub distance: u8,
+    /// The routing protocol's cost (0 for connected and static routes).
+    pub metric: u32,
 }
 
 impl Route {
@@ -168,9 +177,24 @@ pub(crate) const ROUTER_TTL: u8 = 255;
 const SVI_MAC_INDEX: usize = 0xf0;
 
 impl Stack {
-    /// The stack for a device, if it has one: end devices always; routers;
-    /// switches through their `Vlan` interfaces (and routed ports).
+    /// The stack for a device with its OSPF routes, worked out for the
+    /// whole project (for views that build one stack at a time).
     pub fn build(
+        project: &Project,
+        id: DeviceId,
+        ports: &PortStates,
+        l2: &Layer2,
+    ) -> Option<Stack> {
+        let ospf = crate::ospf::Ospf::compute(project, ports, l2);
+        let mut stack = Stack::build_base(project, id, ports, l2)?;
+        stack.install_ospf(&ospf, id);
+        Some(stack)
+    }
+
+    /// The stack for a device, if it has one: end devices always; routers;
+    /// switches through their `Vlan` interfaces (and routed ports). Static
+    /// and connected routes only.
+    pub(crate) fn build_base(
         project: &Project,
         id: DeviceId,
         ports: &PortStates,
@@ -204,6 +228,7 @@ impl Stack {
                         next_hop: Some(gateway),
                         iface: port,
                         distance: 1,
+                        metric: 0,
                     });
                 }
                 stack
@@ -322,6 +347,7 @@ impl Stack {
                         next_hop: Some(gateway),
                         iface: "Vlan1".into(),
                         distance: 1,
+                        metric: 0,
                     });
                 }
                 stack
@@ -341,6 +367,47 @@ impl Stack {
             ))
         });
         Some(stack)
+    }
+
+    /// Adds the routes OSPF chose for `id`, where no route with a lower
+    /// administrative distance has the prefix already.
+    pub(crate) fn install_ospf(&mut self, ospf: &crate::ospf::Ospf, id: DeviceId) {
+        let Some(router) = ospf.router(id) else {
+            return;
+        };
+        for r in &router.routes {
+            let taken = self.routes.iter().any(|x| {
+                x.network == r.network
+                    && x.prefix_len == r.prefix_len
+                    && x.distance <= crate::ospf::OSPF_DISTANCE
+            });
+            if taken {
+                continue;
+            }
+            let source = match r.kind {
+                crate::ospf::OspfRouteKind::Intra => RouteSource::Ospf,
+                crate::ospf::OspfRouteKind::Inter => RouteSource::OspfInterArea,
+                crate::ospf::OspfRouteKind::External2 => RouteSource::OspfExternal2,
+            };
+            for (next_hop, iface) in &r.next_hops {
+                self.routes.push(Route {
+                    network: r.network,
+                    prefix_len: r.prefix_len,
+                    source,
+                    next_hop: Some(*next_hop),
+                    iface: iface.clone(),
+                    distance: crate::ospf::OSPF_DISTANCE,
+                    metric: r.cost,
+                });
+            }
+        }
+        self.routes.sort_by(|a, b| {
+            (u32::from(a.network), a.prefix_len, a.source).cmp(&(
+                u32::from(b.network),
+                b.prefix_len,
+                b.source,
+            ))
+        });
     }
 
     fn empty(kind: StackKind, ttl: u8) -> Stack {
@@ -386,6 +453,7 @@ impl Stack {
                 next_hop: None,
                 iface: iface.name.clone(),
                 distance: 0,
+                metric: 0,
             });
             if self.kind != StackKind::Host {
                 routes.push(Route {
@@ -395,6 +463,7 @@ impl Stack {
                     next_hop: None,
                     iface: iface.name.clone(),
                     distance: 0,
+                    metric: 0,
                 });
             }
         }
@@ -424,6 +493,7 @@ impl Stack {
                 next_hop,
                 iface,
                 distance: r.distance,
+                metric: 0,
             });
         }
         for candidate in candidates {

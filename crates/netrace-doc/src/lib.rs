@@ -9,6 +9,7 @@ mod config;
 mod device;
 mod error;
 mod ip;
+mod ospf;
 mod project;
 mod services;
 mod style;
@@ -22,6 +23,7 @@ pub use config::{
 pub use device::{DeviceKind, Medium};
 pub use error::DocError;
 pub use ip::{HostIp, prefix_from_mask};
+pub use ospf::{OspfInterface, OspfNetwork, OspfProcess};
 pub use project::{
     CanvasItem, Device, DeviceId, DeviceSettings, Endpoint, Link, LinkId, Point, Project,
     RemovedDevice,

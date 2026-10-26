@@ -10,8 +10,8 @@ use std::net::Ipv4Addr;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccessList, DeviceKind, DhcpPool, DocError, NatPool, NatRule, NatSide, StpConfig,
-    SwitchportConfig, VlanConfig,
+    AccessList, DeviceKind, DhcpPool, DocError, NatPool, NatRule, NatSide, OspfInterface,
+    OspfProcess, StpConfig, SwitchportConfig, VlanConfig,
 };
 
 /// An address and prefix configured on an interface (`ip address A M`).
@@ -78,6 +78,8 @@ pub struct InterfaceConfig {
     /// `ip nat inside` / `ip nat outside`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nat: Option<NatSide>,
+    #[serde(skip_serializing_if = "OspfInterface::is_default")]
+    pub ospf: OspfInterface,
 }
 
 /// Where a static route sends traffic.
@@ -173,6 +175,9 @@ pub struct DeviceConfig {
     /// `ip nat inside source ...`, in the order typed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub nat_rules: Vec<NatRule>,
+    /// `router ospf N` processes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ospf: Vec<OspfProcess>,
 }
 
 fn is_true(value: &bool) -> bool {
@@ -201,6 +206,7 @@ impl Default for DeviceConfig {
             access_lists: Vec::new(),
             nat_pools: Vec::new(),
             nat_rules: Vec::new(),
+            ospf: Vec::new(),
         }
     }
 }

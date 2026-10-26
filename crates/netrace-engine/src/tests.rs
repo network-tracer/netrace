@@ -1834,3 +1834,417 @@ fn the_nat_lab_works_as_its_note_says() {
     let report = net.session_report(s).unwrap();
     assert!(report.contains("Reply from 203.0.113.10"), "{report}");
 }
+
+use netrace_doc::{OspfNetwork, OspfProcess};
+
+/// `router ospf 1` with `network 0.0.0.0 255.255.255.255 area 0` (or the
+/// given statements).
+fn ospf_on(p: &mut Project, r: DeviceId, networks: &[(&str, &str, u32)]) {
+    let mut config = p.device(r).unwrap().config.clone();
+    let mut process = OspfProcess::new(1);
+    for (a, w, area) in networks {
+        process.networks.push(OspfNetwork {
+            address: ip(a),
+            wildcard: ip(w),
+            area: *area,
+        });
+    }
+    if networks.is_empty() {
+        process.networks.push(OspfNetwork {
+            address: ip("0.0.0.0"),
+            wildcard: ip("255.255.255.255"),
+            area: 0,
+        });
+    }
+    config.ospf = vec![process];
+    p.set_device_config(r, config).unwrap();
+}
+
+fn edit_iface(
+    p: &mut Project,
+    r: DeviceId,
+    iface: &str,
+    f: impl FnOnce(&mut netrace_doc::InterfaceConfig),
+) {
+    let mut config = p.device(r).unwrap().config.clone();
+    f(config.interface_mut(DeviceKind::Router, iface));
+    p.set_device_config(r, config).unwrap();
+}
+
+/// R1, R2, R3 in a triangle (Gi0/0–Gi0/2), loopbacks 1.1.1.1 / 2.2.2.2 /
+/// 3.3.3.3, PC1 on R1 Gi0/3 (192.168.1.0/24), PC3 on R3 Gi0/3
+/// (192.168.3.0/24). No OSPF yet.
+fn triangle() -> (Project, [DeviceId; 3], DeviceId, DeviceId) {
+    let mut p = Project::new();
+    let r: Vec<DeviceId> = (0..3)
+        .map(|_| p.add_device(DeviceKind::Router, Point::default()).id)
+        .collect();
+    let pc1 = host(&mut p, "192.168.1.10", "192.168.1.1");
+    let pc3 = host(&mut p, "192.168.3.10", "192.168.3.1");
+    for (a, ap, b, bp, net) in [
+        (
+            r[0],
+            "GigabitEthernet0/0",
+            r[1],
+            "GigabitEthernet0/0",
+            "10.0.12",
+        ),
+        (
+            r[1],
+            "GigabitEthernet0/1",
+            r[2],
+            "GigabitEthernet0/1",
+            "10.0.23",
+        ),
+        (
+            r[2],
+            "GigabitEthernet0/2",
+            r[0],
+            "GigabitEthernet0/2",
+            "10.0.13",
+        ),
+    ] {
+        p.connect(end(a, ap), end(b, bp), Medium::Copper).unwrap();
+        let (ia, ib) = (
+            r.iter().position(|x| *x == a).unwrap() + 1,
+            r.iter().position(|x| *x == b).unwrap() + 1,
+        );
+        router_port(&mut p, a, ap, &format!("{net}.{ia}"), 24);
+        router_port(&mut p, b, bp, &format!("{net}.{ib}"), 24);
+    }
+    p.connect(
+        end(r[0], "GigabitEthernet0/3"),
+        end(pc1, "FastEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        end(r[2], "GigabitEthernet0/3"),
+        end(pc3, "FastEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    router_port(&mut p, r[0], "GigabitEthernet0/3", "192.168.1.1", 24);
+    router_port(&mut p, r[2], "GigabitEthernet0/3", "192.168.3.1", 24);
+    for (i, id) in r.iter().enumerate() {
+        let n = i + 1;
+        router_port(&mut p, *id, "Loopback0", &format!("{n}.{n}.{n}.{n}"), 32);
+    }
+    (p, [r[0], r[1], r[2]], pc1, pc3)
+}
+
+fn ospf_route(net: &Network, r: DeviceId, prefix: &str, len: u8) -> crate::OspfRoute {
+    net.ospf()
+        .router(r)
+        .unwrap()
+        .routes
+        .iter()
+        .find(|x| x.network == ip(prefix) && x.prefix_len == len)
+        .unwrap_or_else(|| {
+            panic!(
+                "no route to {prefix}/{len}: {:#?}",
+                net.ospf().router(r).unwrap().routes
+            )
+        })
+        .clone()
+}
+
+#[test]
+fn ospf_learns_routes_and_explains_them() {
+    let (mut p, [r1, r2, r3], pc1, _) = triangle();
+    for r in [r1, r2, r3] {
+        ospf_on(&mut p, r, &[]);
+    }
+    let mut net = Network::new(p.clone());
+    let o = net.ospf().router(r1).unwrap().clone();
+    assert_eq!(o.router_id, Some(ip("1.1.1.1")));
+    assert!(
+        o.router_id_reason.contains("highest loopback"),
+        "{}",
+        o.router_id_reason
+    );
+    let full: Vec<Ipv4Addr> = o
+        .neighbors
+        .iter()
+        .filter(|n| n.state == crate::NeighborState::Full)
+        .map(|n| n.router_id)
+        .collect();
+    assert_eq!(full.len(), 2, "{:#?}", o.neighbors);
+    // R2 (2.2.2.2) beats R1 for DR on their link.
+    let gi0 = o
+        .ifaces
+        .iter()
+        .find(|i| i.name == "GigabitEthernet0/0")
+        .unwrap();
+    assert_eq!(gi0.state, crate::OspfIfState::Bdr);
+    assert_eq!(gi0.dr.unwrap().0, ip("2.2.2.2"));
+
+    let lan = ospf_route(&net, r1, "192.168.3.0", 24);
+    assert_eq!(lan.cost, 2);
+    assert_eq!(
+        lan.next_hops,
+        vec![(ip("10.0.13.3"), "GigabitEthernet0/2".to_string())]
+    );
+    assert!(lan.reason.contains("total cost 2"), "{}", lan.reason);
+    // Loopbacks are advertised as /32 host routes.
+    assert_eq!(ospf_route(&net, r1, "3.3.3.3", 32).cost, 2);
+    // ... and they're in the routing table as O, so pings cross the routers.
+    let table = crate::routing_table(&p, r1);
+    assert!(table.iter().any(|r| r.source == crate::RouteSource::Ospf
+        && r.network == ip("192.168.3.0")
+        && r.metric == 2
+        && r.distance == 110));
+    let s = net.ping(pc1, ip("192.168.3.10"), 4, SimTime::ZERO).unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(report.contains("Reply from 192.168.3.10"), "{report}");
+
+    // A higher cost on the direct link sends traffic round through R2.
+    edit_iface(&mut p, r1, "GigabitEthernet0/2", |i| i.ospf.cost = Some(10));
+    let net = Network::new(p.clone());
+    let lan = ospf_route(&net, r1, "192.168.3.0", 24);
+    assert_eq!((lan.cost, lan.next_hops[0].0), (3, ip("10.0.12.2")));
+    assert_eq!(lan.path, vec!["R1", "R2", "R3"]);
+    assert!(
+        lan.alternatives
+            .iter()
+            .any(|a| a.contains("via R3") && a.contains("cost 11")),
+        "{:?}",
+        lan.alternatives
+    );
+    // Equal costs: both paths are used.
+    edit_iface(&mut p, r1, "GigabitEthernet0/2", |i| i.ospf.cost = Some(2));
+    let net = Network::new(p);
+    let lan = ospf_route(&net, r1, "192.168.3.0", 24);
+    assert_eq!(lan.next_hops.len(), 2, "{lan:?}");
+    assert!(lan.reason.contains("cost the same"), "{}", lan.reason);
+}
+
+#[test]
+fn ospf_says_why_neighbours_dont_form() {
+    let (mut p, [r1, r2, r3], _, _) = triangle();
+    ospf_on(&mut p, r1, &[]);
+    ospf_on(
+        &mut p,
+        r2,
+        &[("10.0.12.0", "0.0.0.255", 0), ("10.0.23.0", "0.0.0.255", 1)],
+    );
+    ospf_on(&mut p, r3, &[]);
+    edit_iface(&mut p, r1, "GigabitEthernet0/2", |i| i.ospf.hello = Some(5));
+    let net = Network::new(p);
+    let problem = |a: DeviceId, b: DeviceId| {
+        net.ospf()
+            .router(a)
+            .unwrap()
+            .neighbors
+            .iter()
+            .find(|n| n.device == b)
+            .and_then(|n| n.problem.clone())
+            .unwrap_or_default()
+    };
+    assert!(problem(r2, r3).contains("area 1"), "{}", problem(r2, r3));
+    assert!(
+        problem(r1, r3).contains("hello/dead timers differ"),
+        "{}",
+        problem(r1, r3)
+    );
+    assert!(problem(r1, r2).is_empty());
+}
+
+#[test]
+fn ospf_elects_a_dr_on_a_shared_segment() {
+    let mut p = Project::new();
+    let sw = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    let mut r = Vec::new();
+    for n in 1..=3u8 {
+        let id = p.add_device(DeviceKind::Router, Point::default()).id;
+        p.connect(
+            end(sw, &format!("FastEthernet0/{n}")),
+            end(id, "GigabitEthernet0/0"),
+            Medium::Copper,
+        )
+        .unwrap();
+        router_port(&mut p, id, "GigabitEthernet0/0", &format!("10.0.0.{n}"), 24);
+        ospf_on(&mut p, id, &[]);
+        r.push(id);
+    }
+    let net = Network::new(p.clone());
+    let seg = &net.ospf().segments[0];
+    assert_eq!(seg.members.len(), 3);
+    assert_eq!(seg.dr.as_ref().unwrap().0, r[2]);
+    assert_eq!(seg.bdr.as_ref().unwrap().0, r[1]);
+    assert!(
+        seg.election.contains("highest router ID"),
+        "{}",
+        seg.election
+    );
+    // R1 and R2 are full with R3 (DR); R1 is full with R2 (BDR).
+    let r1 = net.ospf().router(r[0]).unwrap();
+    assert!(
+        r1.neighbors
+            .iter()
+            .all(|n| n.state == crate::NeighborState::Full)
+    );
+    // Priority 0 on R3 hands DR to R2 and leaves R3 a DROTHER at 2-Way with R1.
+    edit_iface(&mut p, r[2], "GigabitEthernet0/0", |i| {
+        i.ospf.priority = Some(0)
+    });
+    let net = Network::new(p);
+    let seg = &net.ospf().segments[0];
+    assert_eq!(seg.dr.as_ref().unwrap().0, r[1]);
+    assert_eq!(seg.bdr.as_ref().unwrap().0, r[0]);
+    let r3 = net.ospf().router(r[2]).unwrap();
+    assert!(
+        r3.neighbors
+            .iter()
+            .all(|n| n.state == crate::NeighborState::Full)
+    );
+    let mut p2 = net.project().clone();
+    edit_iface(&mut p2, r[0], "GigabitEthernet0/0", |i| {
+        i.ospf.priority = Some(0)
+    });
+    let net = Network::new(p2);
+    let r1 = net.ospf().router(r[0]).unwrap();
+    let to_r3 = r1.neighbors.iter().find(|n| n.device == r[2]).unwrap();
+    assert_eq!(
+        to_r3.state,
+        crate::NeighborState::TwoWay,
+        "{}",
+        to_r3.reason
+    );
+}
+
+#[test]
+fn ospf_reconverges_when_a_link_fails() {
+    let (mut p, [r1, r2, r3], _, _) = triangle();
+    for r in [r1, r2, r3] {
+        ospf_on(&mut p, r, &[]);
+    }
+    let link = p
+        .links()
+        .iter()
+        .find(|l| l.a.device == r3 && l.b.device == r1)
+        .unwrap()
+        .id;
+    let (after, changes) = crate::Ospf::after_link_failure(&p, link);
+    let lan = after
+        .router(r1)
+        .unwrap()
+        .routes
+        .iter()
+        .find(|r| r.network == ip("192.168.3.0"))
+        .unwrap();
+    assert_eq!((lan.cost, lan.next_hops[0].0), (3, ip("10.0.12.2")));
+    assert!(
+        changes
+            .iter()
+            .any(|c| c.device == r1 && c.explanation.contains("loses its adjacency with R3"))
+    );
+    assert!(
+        changes.iter().any(|c| c.device == r1
+            && c.network == Some((ip("192.168.3.0"), 24))
+            && c.explanation.contains("R1 → R2 → R3")),
+        "{changes:#?}"
+    );
+}
+
+#[test]
+fn ospf_carries_a_default_route_and_inter_area_routes() {
+    let (mut p, [r1, r2, r3], _, _) = triangle();
+    ospf_on(&mut p, r1, &[]);
+    ospf_on(&mut p, r2, &[]);
+    // R3 puts its LAN in area 1: it becomes an ABR.
+    ospf_on(
+        &mut p,
+        r3,
+        &[
+            ("192.168.3.0", "0.0.0.255", 1),
+            ("0.0.0.0", "255.255.255.255", 0),
+        ],
+    );
+    // R2 has an internet default route and originates it.
+    add_route(&mut p, r2, "0.0.0.0", 0, "10.0.23.3", 1);
+    let mut config = p.device(r2).unwrap().config.clone();
+    config.ospf[0].default_originate = true;
+    p.set_device_config(r2, config).unwrap();
+    let net = Network::new(p.clone());
+    assert!(net.ospf().router(r3).unwrap().abr);
+    let lan = ospf_route(&net, r1, "192.168.3.0", 24);
+    assert_eq!(lan.kind, crate::OspfRouteKind::Inter);
+    assert_eq!(lan.cost, 2);
+    let default = ospf_route(&net, r1, "0.0.0.0", 0);
+    assert_eq!(default.kind, crate::OspfRouteKind::External2);
+    assert_eq!((default.cost, default.next_hops[0].0), (1, ip("10.0.12.2")));
+    let table = crate::routing_table(&p, r1);
+    assert!(
+        table
+            .iter()
+            .any(|r| r.source == crate::RouteSource::OspfExternal2 && r.is_default())
+    );
+    // R2's own static default wins over anything OSPF could offer it.
+    assert!(
+        crate::routing_table(&p, r2)
+            .iter()
+            .filter(|r| r.is_default())
+            .all(|r| r.source == crate::RouteSource::Static)
+    );
+}
+
+#[test]
+fn the_ospf_lab_works_as_its_note_says() {
+    let mut p = Project::from_json(include_bytes!(
+        "../../../examples/ospf.netrace/project.json"
+    ))
+    .unwrap();
+    let id = |p: &Project, name: &str| p.devices().iter().find(|d| d.name == name).unwrap().id;
+    let (r1, r3, pc1) = (id(&p, "R1"), id(&p, "R3"), id(&p, "PC1"));
+    let mut net = Network::new(p.clone());
+    assert_eq!(
+        net.ospf().router(r1).unwrap().neighbors.len(),
+        1,
+        "only R2 runs OSPF with R1 so far"
+    );
+    let s = net.ping(pc1, ip("192.168.3.10"), 3, SimTime::ZERO).unwrap();
+    assert!(
+        !net.session_report(s)
+            .unwrap()
+            .contains("Reply from 192.168.3.10")
+    );
+
+    let mut config = p.device(r3).unwrap().config.clone();
+    let mut process = netrace_doc::OspfProcess::new(1);
+    process.router_id = Some(ip("3.3.3.3"));
+    process.networks.push(OspfNetwork {
+        address: ip("0.0.0.0"),
+        wildcard: ip("255.255.255.255"),
+        area: 0,
+    });
+    process.passive.push("GigabitEthernet0/3".into());
+    config.ospf = vec![process];
+    p.set_device_config(r3, config).unwrap();
+    let mut net = Network::new(p.clone());
+    let s = net.ping(pc1, ip("192.168.3.10"), 4, SimTime::ZERO).unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(report.contains("Reply from 192.168.3.10"), "{report}");
+    assert_eq!(
+        ospf_route(&net, r1, "192.168.3.0", 24).next_hops[0].0,
+        ip("10.0.13.3")
+    );
+
+    edit_iface(&mut p, r1, "GigabitEthernet0/2", |i| i.ospf.cost = Some(10));
+    let net = Network::new(p.clone());
+    assert_eq!(
+        ospf_route(&net, r1, "192.168.3.0", 24).next_hops[0].0,
+        ip("10.0.12.2")
+    );
+    let link = p
+        .links()
+        .iter()
+        .find(|l| l.a.device == r1 && l.a.port == "GigabitEthernet0/0")
+        .unwrap()
+        .id;
+    let (_, changes) = crate::Ospf::after_link_failure(&p, link);
+    assert!(
+        changes.iter().any(|c| c.explanation.contains("R1 → R3")),
+        "{changes:#?}"
+    );
+}

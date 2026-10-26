@@ -973,3 +973,147 @@ fn nat_from_the_cli() {
         "{stats}"
     );
 }
+
+#[test]
+fn ospf_from_the_cli() {
+    // R1 (lab) gets a neighbour: R2 on R1 Gi0/1's network instead of PC2.
+    let (mut p, r1, pc1) = lab();
+    let pc2 = p.devices().iter().find(|d| d.name == "PC2").unwrap().id;
+    let link = p
+        .links()
+        .iter()
+        .find(|l| l.a.device == r1 && l.a.port == "GigabitEthernet0/1")
+        .unwrap()
+        .id;
+    p.disconnect(link).unwrap();
+    let r2 = p.add_device(DeviceKind::Router, Point::default()).id;
+    let ep = |device, port: &str| Endpoint {
+        device,
+        port: port.into(),
+    };
+    p.connect(
+        ep(r1, "GigabitEthernet0/1"),
+        ep(r2, "GigabitEthernet0/1"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        ep(r2, "GigabitEthernet0/0"),
+        ep(pc2, "FastEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+
+    let mut c = Console::new(p, r1);
+    c.lines(&[
+        "en",
+        "conf t",
+        "int g0/0",
+        "ip address 192.168.1.1 255.255.255.0",
+        "no shut",
+        "int g0/1",
+        "ip address 10.0.12.1 255.255.255.0",
+        "ip ospf cost 5",
+        "no shut",
+        "router ospf 1",
+    ]);
+    assert_eq!(c.prompt(), "R1(config-router)#");
+    c.lines(&[
+        "router-id 1.1.1.1",
+        "network 192.168.1.0 0.0.0.255 area 0",
+        "network 10.0.12.0 0.0.0.255 area 0",
+        "passive-interface g0/0",
+        "end",
+    ]);
+    let run = c.run("show run");
+    assert!(run.contains(" ip ospf cost 5\n"), "{run}");
+    assert!(
+        run.contains(
+            "router ospf 1\n router-id 1.1.1.1\n passive-interface GigabitEthernet0/0\n network 192.168.1.0 0.0.0.255 area 0\n network 10.0.12.0 0.0.0.255 area 0\n!"
+        ),
+        "{run}"
+    );
+
+    let mut c2 = Console::new(c.project.clone(), r2);
+    c2.lines(&[
+        "en",
+        "conf t",
+        "int g0/0",
+        "ip address 192.168.2.1 255.255.255.0",
+        "ip ospf 1 area 0",
+        "no shut",
+        "int g0/1",
+        "ip address 10.0.12.2 255.255.255.0",
+        "ip ospf 1 area 0",
+        "no shut",
+        "router ospf 1",
+        "router-id 2.2.2.2",
+        "end",
+    ]);
+    c.project = c2.project.clone();
+    let nbr = c.run("show ip ospf neighbor");
+    assert!(
+        nbr.contains("Neighbor ID     Pri   State           Dead Time   Address         Interface"),
+        "{nbr}"
+    );
+    assert!(
+        nbr.contains(
+            "2.2.2.2           1   FULL/DR         00:00:35    10.0.12.2       GigabitEthernet0/1"
+        ),
+        "{nbr}"
+    );
+    let brief = c.run("show ip ospf interface brief");
+    assert!(
+        brief.contains("Gi0/1        1     0               10.0.12.1/24       5     BDR   1/1"),
+        "{brief}"
+    );
+    assert!(
+        brief.contains("Gi0/0        1     0               192.168.1.1/24     1     WAIT  0/0"),
+        "{brief}"
+    );
+    let route = c.run("show ip route");
+    assert!(
+        route.contains("O     192.168.2.0/24 [110/6] via 10.0.12.2, 00:00:12, GigabitEthernet0/1"),
+        "{route}"
+    );
+    let only = c.run("show ip route ospf");
+    assert!(
+        only.contains("192.168.2.0/24") && !only.contains("192.168.1.0/24 is directly"),
+        "{only}"
+    );
+    let db = c.run("show ip ospf database");
+    assert!(
+        db.contains("OSPF Router with ID (1.1.1.1) (Process ID 1)"),
+        "{db}"
+    );
+    assert!(
+        db.contains("Router Link States (Area 0)") && db.contains("Net Link States (Area 0)"),
+        "{db}"
+    );
+    let protocols = c.run("show ip protocols");
+    assert!(
+        protocols.contains("Routing Protocol is \"ospf 1\""),
+        "{protocols}"
+    );
+    assert!(
+        protocols.contains("Passive Interface(s):\n    GigabitEthernet0/0"),
+        "{protocols}"
+    );
+    let iface = c.run("show ip ospf interface g0/1");
+    assert!(
+        iface.contains("Designated Router (ID) 2.2.2.2, Interface address 10.0.12.2"),
+        "{iface}"
+    );
+    assert!(
+        iface.contains("Adjacent with neighbor 2.2.2.2  (Designated Router)"),
+        "{iface}"
+    );
+
+    c.network = Network::new(c.project.clone());
+    let s = c
+        .network
+        .ping(pc1, "192.168.2.10".parse().unwrap(), 4, SimTime::ZERO)
+        .unwrap();
+    let report = c.network.session_report(s).unwrap();
+    assert!(report.contains("Reply from 192.168.2.10"), "{report}");
+}

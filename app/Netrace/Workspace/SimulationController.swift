@@ -192,6 +192,26 @@ final class SimulationController: ObservableObject {
         simulation?.stpLinkFailure(linkId: link, vlan: vlan)
     }
 
+    // OSPF is worked out with the topology, so both are cached per topology.
+    private var ospfCache: (key: String, view: OspfView)?
+    private var ospfFailureCache: (key: String, link: UInt64, failure: OspfFailure)?
+
+    func ospfView() -> OspfView? {
+        guard let simulation else { return nil }
+        if let cache = ospfCache, cache.key == topologyKey { return cache.view }
+        let view = simulation.ospfView()
+        ospfCache = (topologyKey, view)
+        return view
+    }
+
+    func ospfLinkFailure(link: UInt64) -> OspfFailure? {
+        guard let simulation else { return nil }
+        if let cache = ospfFailureCache, cache.key == topologyKey, cache.link == link { return cache.failure }
+        let failure = simulation.ospfLinkFailure(linkId: link)
+        ospfFailureCache = (topologyKey, link, failure)
+        return failure
+    }
+
     func macAddress(of device: UInt64, port: String) -> String? {
         simulation?.macAddress(device: device, port: port)
     }

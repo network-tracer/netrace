@@ -40,6 +40,8 @@ struct LinksLayer: View {
     var layer2: Layer2Overlay?
     /// Port roles in the STP view (replaces the lights).
     var stp: StpDisplay?
+    /// Costs and DR / BDR in the OSPF view (replaces the lights).
+    var ospf: OspfDisplay?
     /// ACL and relay badges at interface ends.
     var services: [ServiceBadge] = []
 
@@ -57,7 +59,7 @@ struct LinksLayer: View {
                 let length = hypot(b.x - a.x, b.y - a.y)
                 guard length > 1 else { continue }
                 let dir = CGPoint(x: (b.x - a.x) / length, y: (b.y - a.y) / length)
-                if let stp, stp.failedLink == link.id {
+                if stp?.failedLink == link.id || ospf?.failedLink == link.id {
                     // The failed link: faded, struck through in the middle.
                     var line = Path()
                     line.move(to: a)
@@ -96,6 +98,14 @@ struct LinksLayer: View {
                             at = CGPoint(x: at.x + dir.x * sign * 16, y: at.y + dir.y * sign * 16)
                         }
                     }
+                    if let ospf {
+                        if let label = ospf.labels[endKey] {
+                            Self.drawOspfLabel(label, at: p, in: &context)
+                        } else {
+                            Self.drawLight(in: &context, at: p, state: state)
+                        }
+                        continue
+                    }
                     if let stp {
                         let key = endKey
                         if let role = stp.roles[key] {
@@ -129,7 +139,7 @@ struct LinksLayer: View {
                 }
 
                 // Semantic zoom: below 70 % the labels would be unreadably small.
-                guard stp == nil, workspace.showsInterfaceLabels, workspace.zoom >= 0.7, length > edgeA + edgeB + 100 else { continue }
+                guard stp == nil, ospf == nil, workspace.showsInterfaceLabels, workspace.zoom >= 0.7, length > edgeA + edgeB + 100 else { continue }
                 for (center, edge, sign, port) in [(a, edgeA, 1.0, link.a.port), (b, edgeB, -1.0, link.b.port)] {
                     // Cables leaving downward pass the device's name label; start labels below it.
                     let clearance: CGFloat = dir.y * sign > 0.5 ? 46 : 26
@@ -221,6 +231,23 @@ struct LinksLayer: View {
         var image = context.resolve(Image(systemName: symbol))
         image.shading = .color(color)
         context.draw(image, in: CGRect(x: p.x - 6.5, y: p.y - 6.5, width: 13, height: 13))
+    }
+
+    /// OSPF view: the interface cost, with DR / BDR, red if the neighbour
+    /// on it won't come up.
+    static func drawOspfLabel(_ label: OspfDisplay.Label, at p: CGPoint, in context: inout GraphicsContext) {
+        let text = label.role.isEmpty ? "\(label.cost)" : "\(label.role) \(label.cost)"
+        let color = label.problem ? Theme.Palette.statusDown
+            : label.role == "DR" ? Color(light: 0x1F7AE0, dark: 0x4C9EFF)
+            : label.role == "BDR" ? Color(light: 0x1F8A9E, dark: 0x3AAFC4)
+            : Color(light: 0x6B6B6B, dark: 0x8A8A8A)
+        let resolved = context.resolve(Text(text).font(.system(size: 8.5, weight: .bold)).foregroundColor(.white))
+        let size = resolved.measure(in: CGSize(width: 200, height: 20))
+        let rect = CGRect(x: p.x - size.width / 2 - 5, y: p.y - 8, width: size.width + 10, height: 16)
+        let capsule = Path(roundedRect: rect, cornerRadius: 8)
+        context.fill(capsule, with: .color(color))
+        context.stroke(capsule, with: .color(Theme.Palette.canvas), lineWidth: 1.5)
+        context.draw(resolved, at: p)
     }
 
     /// STP view: a lettered badge for the port's role (R, D, or a red ✕).

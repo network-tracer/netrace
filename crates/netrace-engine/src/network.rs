@@ -162,6 +162,8 @@ pub struct Network {
     pub(crate) nat_hits: BTreeMap<DeviceId, (u32, u32)>,
     /// The NAT decision to attach to the next event this device records.
     pub(crate) pending_nat: Option<crate::NatDecision>,
+    /// OSPF in its converged state, worked out with the topology.
+    pub(crate) ospf: crate::Ospf,
     pub(crate) trace: Vec<TraceEvent>,
     pub(crate) sessions: Vec<PingSession>,
     warnings: Vec<String>,
@@ -194,6 +196,7 @@ impl Network {
             nat_tables: BTreeMap::new(),
             nat_hits: BTreeMap::new(),
             pending_nat: None,
+            ospf: crate::Ospf::default(),
             trace: Vec::new(),
             sessions: Vec::new(),
             warnings: Vec::new(),
@@ -317,20 +320,28 @@ impl Network {
         self.nat_tables.clear();
         self.nat_hits.clear();
         self.pending_nat = None;
+        self.ospf = crate::Ospf::compute(&self.project, &self.ports, &self.l2);
         let ports = &self.ports;
         let l2 = &self.l2;
         let project = &self.project;
+        let ospf = &self.ospf;
+        let build = |id: DeviceId| {
+            Stack::build_base(project, id, ports, l2).map(|mut s| {
+                s.install_ospf(ospf, id);
+                s
+            })
+        };
         self.nodes = project
             .devices()
             .iter()
             .map(|d| {
                 let role = match d.kind {
                     k if k.is_host() || k == DeviceKind::Router => {
-                        Role::Stack(Stack::build(project, d.id, ports, l2).expect("hosts and routers have stacks"))
+                        Role::Stack(build(d.id).expect("hosts and routers have stacks"))
                     }
                     k if k.is_switch() => Role::Switch {
                         table: BTreeMap::new(),
-                        svi: Stack::build(project, d.id, ports, l2),
+                        svi: build(d.id),
                     },
                     DeviceKind::Hub => Role::Hub,
                     DeviceKind::Firewall => Role::Inert(

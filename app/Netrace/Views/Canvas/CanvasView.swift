@@ -167,6 +167,7 @@ struct CanvasView: View {
             LinksLayer(document: document, workspace: workspace, positions: positions,
                        layer2: workspace.showsLayer2 ? simulation.layer2 : nil,
                        stp: StpDisplay.make(simulation: simulation, workspace: workspace),
+                       ospf: OspfDisplay.make(simulation: simulation, workspace: workspace),
                        services: workspace.showsLayer2 ? simulation.services : [])
                 .allowsHitTesting(false)
 

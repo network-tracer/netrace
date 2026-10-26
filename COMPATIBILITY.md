@@ -43,7 +43,9 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 | `ip nat pool NAME A B netmask M / prefix-length N` | ✅ | | | |
 | `ip nat inside source static L G` | ✅ | | | The router answers ARP for inside global addresses on the outside subnet, as IOS does |
 | `ip nat inside source list N pool P [overload]`, `... interface X [overload]` | ✅ | | | Inside source only; ICMP and UDP translated (no TCP yet); translations don't time out; no `clear ip nat translation` |
-| OSPF | ⬜ | | | M5 |
+| `router ospf N`: `network A W area N`, `router-id`, `passive-interface [default]`, `default-information originate`, `auto-cost reference-bandwidth` | ✅ | | | One process per router. Shown converged: a new `router-id` applies at once (IOS waits for `clear ip ospf process`) and a DR election runs as if all routers started together (IOS keeps an existing DR) |
+| `ip ospf cost / priority / hello-interval / dead-interval`, `ip ospf N area A`, `ip ospf network point-to-point` | ✅ | | | |
+| Multi-area (ABR summaries, `O IA`), `O*E2` default | ✅ | | | No stub / NSSA areas, no area ranges, no authentication, no MTU checks |
 
 ## show commands
 
@@ -54,6 +56,7 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 | `show ip dhcp binding`, `show ip dhcp pool` | ✅ | | |
 | `show access-lists [X]`, `show ip access-lists [X]` (with match counts) | ✅ | | |
 | `show ip nat translations [verbose]`, `show ip nat statistics` | ✅ | | |
+| `show ip ospf neighbor`, `show ip ospf interface [brief]`, `show ip ospf database`, `show ip ospf`, `show ip protocols`, `show ip route ospf` | ✅ | | |
 | `show ip route` | ✅ | | |
 | `show arp`, `show mac address-table` | ✅ | | |
 | `show vlan [brief]`, `show interfaces trunk/status/X switchport` | ✅ | | |
