@@ -1007,7 +1007,7 @@ private struct NodeView: View {
     @ObservedObject var workspace: WorkspaceModel
     /// VLANs this switch is the spanning-tree root for.
     var rootVlans: [UInt16] = []
-    /// The root bridge in the STP view: highlighted with a ring.
+    /// The root bridge in the STP view: a gold band and halo.
     var isStpRoot = false
     var isDHCPServer = false
     let isSelected: Bool
@@ -1024,15 +1024,8 @@ private struct NodeView: View {
 
     var body: some View {
         let power = workspace.powerState(device.id)
-        DeviceSymbolView(kind: device.kind, isSelected: isSelected, isDimmed: power == .stopped, tint: device.color)
-            .background {
-                if isStpRoot {
-                    Circle()
-                        .fill(Theme.Palette.statusWarning.opacity(0.18))
-                        .overlay(Circle().strokeBorder(Theme.Palette.statusWarning, lineWidth: 2))
-                        .frame(width: 64, height: 64)
-                }
-            }
+        DeviceSymbolView(kind: device.kind, isSelected: isSelected, isRoot: isStpRoot,
+                         isDimmed: power == .stopped, tint: device.color)
             .overlay(alignment: .bottomTrailing) {
                 if isDHCPServer {
                     Text("DHCP")
@@ -1046,13 +1039,10 @@ private struct NodeView: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if !rootVlans.isEmpty {
-                    Image(systemName: "crown.fill")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Theme.Palette.statusWarning)
-                        .padding(2)
-                        .background(Circle().fill(Theme.Palette.canvas))
-                        .offset(x: -6, y: -8)
+                // The STP view draws the halo instead; the badge would repeat it.
+                if !rootVlans.isEmpty && !isStpRoot {
+                    RootBadge()
+                        .offset(x: -8, y: -10)
                         .help("Spanning-tree root bridge for VLAN \(rootVlans.map(String.init).joined(separator: ", "))")
                 }
             }

@@ -249,6 +249,8 @@ struct DeviceSymbolView: View {
     let kind: DeviceKind
     var scale: CGFloat = 1
     var isSelected = false
+    /// The STP view's root bridge: a gold band with a soft halo outside it.
+    var isRoot = false
     var isDimmed = false
     /// The user's colour for this device; `nil` is the default ink.
     var tint: Swatch?
@@ -268,11 +270,21 @@ struct DeviceSymbolView: View {
         .frame(width: size.width * scale, height: size.height * scale)
         .opacity(isDimmed ? 0.4 : 1)
         .background {
-            if isSelected {
-                // A solid band hugging the silhouette with no gap: a stroke
-                // centred on the outline, whose inner half the symbol covers.
-                DeviceOutlineShape(kind: kind)
-                    .stroke(Theme.Palette.accent, style: StrokeStyle(lineWidth: 8, lineJoin: .round))
+            ZStack {
+                if isRoot {
+                    // Halo first, then the solid band; selection's band (blue)
+                    // covers the gold one, so a selected root keeps its halo.
+                    DeviceOutlineShape(kind: kind)
+                        .stroke(Theme.Palette.root.opacity(0.28), style: StrokeStyle(lineWidth: 16, lineJoin: .round))
+                    DeviceOutlineShape(kind: kind)
+                        .stroke(Theme.Palette.root, style: StrokeStyle(lineWidth: 8, lineJoin: .round))
+                }
+                if isSelected {
+                    // A solid band hugging the silhouette with no gap: a stroke
+                    // centred on the outline, whose inner half the symbol covers.
+                    DeviceOutlineShape(kind: kind)
+                        .stroke(Theme.Palette.accent, style: StrokeStyle(lineWidth: 8, lineJoin: .round))
+                }
             }
         }
         .contentShape(DeviceOutlineShape(kind: kind))

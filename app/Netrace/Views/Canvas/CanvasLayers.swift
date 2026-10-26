@@ -116,15 +116,15 @@ struct LinksLayer: View {
                     if end?.errDisabled == true {
                         Self.drawLight(in: &context, at: p, state: .stopped)
                     } else if end?.blocked == true {
-                        // Spanning tree: an amber bar across the cable at the blocked port.
+                        // Spanning tree: a red bar across the cable at the blocked port.
                         let bar = CGPoint(x: -dir.y * 7, y: dir.x * 7)
                         let at = CGPoint(x: p.x + dir.x * sign * 9, y: p.y + dir.y * sign * 9)
                         var path = Path()
                         path.move(to: CGPoint(x: at.x - bar.x, y: at.y - bar.y))
                         path.addLine(to: CGPoint(x: at.x + bar.x, y: at.y + bar.y))
-                        context.stroke(path, with: .color(Theme.Palette.statusWarning),
+                        context.stroke(path, with: .color(Theme.Palette.statusDown),
                                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        Self.drawLight(in: &context, at: p, state: .suspended, color: Theme.Palette.statusWarning)
+                        Self.drawLight(in: &context, at: p, state: .suspended, color: Theme.Palette.statusDown)
                     } else {
                         Self.drawLight(in: &context, at: p, state: state)
                     }
@@ -260,7 +260,7 @@ struct LinksLayer: View {
         }
         context.fill(circle, with: .color(role.color))
         context.stroke(circle, with: .color(Theme.Palette.canvas), lineWidth: 1.5)
-        let text = context.resolve(Text(role.letter).font(.system(size: highlighted ? 11 : 9.5, weight: .bold)).foregroundColor(.white))
+        let text = context.resolve(Text(role.letter).font(.system(size: highlighted ? 11 : 9.5, weight: .bold)).foregroundColor(role.letterColor))
         context.draw(text, at: p)
     }
 

@@ -102,14 +102,13 @@ private struct Layer2Legend: View {
                     }
                     if overlay.ports.contains(where: \.blocked) {
                         HStack(spacing: Theme.Spacing.xs) {
-                            Capsule().fill(Theme.Palette.statusWarning).frame(width: 3, height: 12).frame(width: 16)
+                            Capsule().fill(Theme.Palette.statusDown).frame(width: 3, height: 12).frame(width: 16)
                             Text("Blocked by STP").font(Theme.Font.caption)
                         }
                     }
                     if !overlay.roots.isEmpty {
                         HStack(spacing: Theme.Spacing.xs) {
-                            Image(systemName: "crown.fill").font(.system(size: 9)).foregroundStyle(Theme.Palette.statusWarning)
-                                .frame(width: 16)
+                            RootBadge()
                             Text("Root bridge").font(Theme.Font.caption)
                         }
                     }

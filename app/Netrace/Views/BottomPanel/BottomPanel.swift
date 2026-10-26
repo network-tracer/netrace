@@ -292,8 +292,9 @@ private struct EventsTab: View {
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.Palette.textSecondary)
                 Spacer()
-                ForEach(NetProtocol.allCases.filter { p in events.contains { $0.netProtocol == p } }) { proto in
-                    ProtocolTag(proto: proto)
+                // Every protocol in the trace, so a hidden one keeps its tag to turn it back on.
+                ForEach(NetProtocol.allCases.filter { p in simulation.trace.contains { $0.netProtocol == p } }) { proto in
+                    ProtocolFilterTag(proto: proto, workspace: workspace)
                 }
                 Button("Add PDU", systemImage: "envelope.badge") { workspace.startPickingPDU() }
                     .controlSize(.small)
@@ -310,7 +311,11 @@ private struct EventsTab: View {
             }
             PanelDivider(axis: .horizontal)
 
-            if events.isEmpty {
+            if events.isEmpty && !simulation.trace.isEmpty {
+                EmptyState(glyph: .system("line.3.horizontal.decrease.circle"), title: "Everything is filtered out",
+                           message: "Click a protocol above to show its events again.")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if events.isEmpty {
                 EmptyState(glyph: .custom(.pdu), title: "No traffic yet",
                            message: "Give two PCs IP addresses, then use Add PDU (or type ping in a PC's console) to watch ARP and ICMP step by step.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

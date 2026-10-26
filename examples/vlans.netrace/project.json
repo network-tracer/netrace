@@ -26,6 +26,6 @@
   ],
   "annotations": [
     { "id": 15, "kind": "note", "rect": { "x": 24.0, "y": 48.0, "width": 336.0, "height": 168.0 },
-      "text": "VLAN lab. 1) On both switches create VLAN 10 (Sales) and 20 (Staff); put Fa0/1 in VLAN 10 and Fa0/2 in VLAN 20. 2) Make Gi0/2 between the switches and SW1 Gi0/1 trunks. 3) On R1 add subinterfaces Gi0/0.10 and .20 (192.168.10.1 and 192.168.20.1). Then ping PC4 from PC1. The amber bar shows the link spanning tree blocks." }
+      "text": "VLAN lab. 1) On both switches create VLAN 10 (Sales) and 20 (Staff); put Fa0/1 in VLAN 10 and Fa0/2 in VLAN 20. 2) Make Gi0/2 between the switches and SW1 Gi0/1 trunks. 3) On R1 add subinterfaces Gi0/0.10 and .20 (192.168.10.1 and 192.168.20.1). Then ping PC4 from PC1. The red bar shows the link spanning tree blocks." }
   ]
 }

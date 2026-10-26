@@ -55,38 +55,48 @@ extension StpRole {
 
     var forwards: Bool { self == .root || self == .designated }
 
+    /// Gold for root ports (each switch's way to the gold root bridge),
+    /// neutral ink for designated ports, red for blocked ones.
     var color: Color {
         switch self {
-        case .root: Theme.Palette.statusUp
-        case .designated: Color(light: 0x1F7AE0, dark: 0x4C9EFF)
+        case .root: Theme.Palette.root
+        case .designated: Theme.Palette.symbolInk
         case .alternate, .backup: Theme.Palette.statusDown
+        }
+    }
+
+    var letterColor: Color {
+        switch self {
+        case .root: Theme.Palette.onRoot
+        case .designated: Theme.Palette.symbolKnockout
+        case .alternate, .backup: .white
         }
     }
 }
 
-/// Right pane in the STP view: the root and why, every switch's path to
-/// it, every port's role and the reason, and the link-failure replay.
+/// Right pane in the STP view, built for scanning: the root and why, the
+/// blocked ports (what people look for), each switch's way to the root,
+/// then the forwarding ports. Reasons open on click.
 struct SpanningTreePanel: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
     @EnvironmentObject private var simulation: SimulationController
     @State private var playing = false
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         let view = simulation.stpView(vlan: workspace.stpVlan)
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                 if let view, !view.bridges.isEmpty {
-                    header(view)
+                    summary(view)
                     if let link = workspace.stpFailedLink {
                         failure(link: link)
-                    } else {
-                        Text("Right-click a cable and choose Fail Link to watch the tree reconverge.")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Palette.textTertiary)
                     }
-                    bridges(view)
-                    ports(view)
+                    blocked(view)
+                    paths(view)
+                    forwarding(view)
+                    footnote
                 } else {
                     EmptyState(glyph: .system("point.3.connected.trianglepath.dotted"), title: "No spanning tree",
                                message: "Spanning tree runs between switches. Cable two or more switches together to see it.")
@@ -111,51 +121,70 @@ struct SpanningTreePanel: View {
 
     private func name(_ id: UInt64) -> String { document.device(id)?.name ?? "?" }
 
-    @ViewBuilder
-    private func header(_ view: StpView) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack {
-                Text("Spanning Tree").font(Theme.Font.title)
-                Spacer()
-                Picker("VLAN", selection: $workspace.stpVlan) {
-                    ForEach(view.vlans, id: \.self) { Text("VLAN \($0)").tag($0) }
-                }
-                .labelsHidden()
-                .fixedSize()
-                .controlSize(.small)
-            }
-            if let root = view.bridges.first(where: \.isRoot) {
-                Label {
-                    Text("\(name(root.deviceId)) is the root bridge").font(Theme.Font.headline)
-                } icon: {
-                    Image(systemName: "crown.fill").foregroundStyle(Theme.Palette.statusWarning)
-                }
-                Text(root.reason)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack(spacing: Theme.Spacing.m) {
-                ForEach([StpRole.root, .designated, .alternate], id: \.self) { role in
-                    HStack(spacing: 4) {
-                        RoleBadge(role: role)
-                        Text(role == .alternate ? "Blocked" : role.title).font(Theme.Font.caption)
-                    }
-                }
-            }
-            .foregroundStyle(Theme.Palette.textSecondary)
+    private func toggle(_ key: String) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) }
         }
     }
 
+    // MARK: Summary
+
+    @ViewBuilder
+    private func summary(_ view: StpView) -> some View {
+        let blocked = view.ports.filter { !$0.role.forwards }.count
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            if view.vlans.count > 1 {
+                Menu {
+                    ForEach(view.vlans, id: \.self) { vlan in
+                        Button("VLAN \(vlan)") { workspace.stpVlan = vlan }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("VLAN \(view.vlan)").font(Theme.Font.title)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.textTertiary)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Each VLAN has its own spanning tree")
+            } else {
+                Text("VLAN \(view.vlan)").font(Theme.Font.title)
+            }
+            if let root = view.bridges.first(where: \.isRoot) {
+                ExplainRow(expanded: expanded.contains("root"), action: { toggle("root") }) {
+                    HStack(spacing: Theme.Spacing.s) {
+                        RootBadge()
+                        Text(name(root.deviceId)).font(Theme.Font.headline)
+                        Spacer(minLength: Theme.Spacing.s)
+                        Text("root bridge")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textTertiary)
+                    }
+                } detail: {
+                    Text(root.reason + "  Bridge ID \(root.bridgeId).")
+                }
+            }
+            HStack(spacing: Theme.Spacing.m) {
+                Stat(value: "\(view.bridges.count)", label: view.bridges.count == 1 ? "switch" : "switches")
+                Stat(value: "\(blocked)", label: blocked == 1 ? "blocked port" : "blocked ports",
+                     color: blocked > 0 ? Theme.Palette.statusDown : Theme.Palette.textPrimary)
+            }
+        }
+    }
+
+    // MARK: Failure replay
+
     @ViewBuilder
     private func failure(link: UInt64) -> some View {
-        let result = simulation.stpLinkFailure(link: link, vlan: workspace.stpVlan)
-        let changes = result?.changes ?? []
+        let changes = simulation.stpLinkFailure(link: link, vlan: workspace.stpVlan)?.changes ?? []
         InspectorBox {
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                HStack {
+                HStack(spacing: Theme.Spacing.s) {
                     Image(systemName: "bolt.horizontal.circle.fill").foregroundStyle(Theme.Palette.statusDown)
-                    Text("Link failure: \(linkName(link))").font(Theme.Font.headline)
+                    Text(linkName(link)).font(Theme.Font.headline)
                 }
                 if changes.isEmpty {
                     Text("Nothing changes: this link wasn't part of the tree for VLAN \(workspace.stpVlan).")
@@ -163,15 +192,16 @@ struct SpanningTreePanel: View {
                         .foregroundStyle(Theme.Palette.textSecondary)
                 }
                 ForEach(Array(changes.enumerated()), id: \.offset) { index, change in
-                    HStack(alignment: .top, spacing: Theme.Spacing.s) {
+                    let done = index < workspace.stpStep
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
                         Text("\(index + 1)")
-                            .font(Theme.Font.captionMedium)
-                            .foregroundStyle(index < workspace.stpStep ? Theme.Palette.onAccent : Theme.Palette.textTertiary)
-                            .frame(width: 18, height: 18)
-                            .background(Circle().fill(index < workspace.stpStep ? Theme.Palette.accent : Theme.Palette.hover))
+                            .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(done ? Theme.Palette.onAccent : Theme.Palette.textTertiary)
+                            .frame(width: 16, height: 16)
+                            .background(Circle().fill(done ? Theme.Palette.accent : Theme.Palette.hover))
                         Text(change.explanation)
                             .font(Theme.Font.caption)
-                            .foregroundStyle(index < workspace.stpStep ? Theme.Palette.textPrimary : Theme.Palette.textTertiary)
+                            .foregroundStyle(done ? Theme.Palette.textPrimary : Theme.Palette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -184,7 +214,7 @@ struct SpanningTreePanel: View {
                     }
                     .disabled(workspace.stpStep >= changes.count)
                     Spacer()
-                    Button("Restore Link") {
+                    Button("Restore") {
                         playing = false
                         workspace.stpFailedLink = nil
                         workspace.stpStep = 0
@@ -196,72 +226,113 @@ struct SpanningTreePanel: View {
     }
 
     private func linkName(_ id: UInt64) -> String {
-        guard let link = document.link(id) else { return "cable" }
-        return "\(name(link.a.deviceId)) \(link.a.port.abbreviatedInterface) – \(name(link.b.deviceId)) \(link.b.port.abbreviatedInterface)"
+        guard let link = document.link(id) else { return "Cable failed" }
+        return "\(name(link.a.deviceId)) \(link.a.port.abbreviatedInterface) – \(name(link.b.deviceId)) \(link.b.port.abbreviatedInterface) failed"
     }
 
-    @ViewBuilder
-    private func bridges(_ view: StpView) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            SectionHeader("Switches")
-            ForEach(view.bridges.sorted { name($0.deviceId) < name($1.deviceId) }, id: \.deviceId) { bridge in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(name(bridge.deviceId)).font(Theme.Font.labelSemibold)
-                        if bridge.isRoot {
-                            Image(systemName: "crown.fill").font(.system(size: 9)).foregroundStyle(Theme.Palette.statusWarning)
-                        }
-                        Spacer()
-                        Text(bridge.isRoot ? "root" : "cost \(bridge.rootCost) via \(bridge.rootPort?.abbreviatedInterface ?? "–")")
-                            .font(Theme.Font.monoSmall)
-                            .foregroundStyle(Theme.Palette.textSecondary)
-                    }
-                    Text("Bridge ID \(bridge.bridgeId)")
-                        .font(Theme.Font.monoSmall)
-                        .foregroundStyle(Theme.Palette.textTertiary)
-                }
-                .padding(.vertical, 2)
-                .contentShape(Rectangle())
-                .onTapGesture { workspace.selectDevices([bridge.deviceId]) }
-            }
-        }
-    }
+    // MARK: Ports and paths
 
-    @ViewBuilder
-    private func ports(_ view: StpView) -> some View {
+    /// Ports of the selected switch first, then by switch and port.
+    private func ordered(_ ports: [StpPortInfo]) -> [StpPortInfo] {
         let selected = workspace.selection
-        let ordered = view.ports.sorted {
-            let a = (selected.contains($0.deviceId) ? 0 : 1, name($0.deviceId), $0.port)
-            let b = (selected.contains($1.deviceId) ? 0 : 1, name($1.deviceId), $1.port)
-            return a < b
+        return ports.sorted {
+            (selected.contains($0.deviceId) ? 0 : 1, name($0.deviceId), $0.port)
+                < (selected.contains($1.deviceId) ? 0 : 1, name($1.deviceId), $1.port)
         }
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            SectionHeader("Ports")
-            ForEach(ordered, id: \.self) { port in
-                HStack(alignment: .top, spacing: Theme.Spacing.s) {
-                    RoleBadge(role: port.role)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(name(port.deviceId)) \(port.port.abbreviatedInterface) · \(port.role.title) · cost \(port.cost)")
-                            .font(Theme.Font.label)
-                        Text(port.reason)
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Palette.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func portRow(_ port: StpPortInfo) -> some View {
+        let key = "p\(port.deviceId)\(port.port)"
+        return ExplainRow(expanded: expanded.contains(key), action: { toggle(key) }) {
+            HStack(spacing: Theme.Spacing.s) {
+                RoleBadge(role: port.role)
+                Text(name(port.deviceId)).font(Theme.Font.label)
+                Text(port.port.abbreviatedInterface)
+                    .font(Theme.Font.monoSmall)
+                    .foregroundStyle(Theme.Palette.textTertiary)
+                Spacer(minLength: Theme.Spacing.s)
+                Text(port.role.forwards ? "\(port.role == .root ? "root" : "designated") · \(port.cost)" : (port.role == .backup ? "backup" : "alternate"))
+                    .font(Theme.Font.caption.monospacedDigit())
+                    .foregroundStyle(Theme.Palette.textSecondary)
+            }
+        } detail: {
+            Text(port.reason)
+        }
+    }
+
+    @ViewBuilder
+    private func blocked(_ view: StpView) -> some View {
+        let ports = ordered(view.ports.filter { !$0.role.forwards })
+        if !ports.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                SectionHeader("Blocked")
+                ForEach(ports, id: \.self) { portRow($0) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func paths(_ view: StpView) -> some View {
+        let bridges = view.bridges.filter { !$0.isRoot }.sorted { name($0.deviceId) < name($1.deviceId) }
+        if !bridges.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                SectionHeader("Path to the root")
+                ForEach(bridges, id: \.deviceId) { bridge in
+                    let key = "b\(bridge.deviceId)"
+                    ExplainRow(expanded: expanded.contains(key), action: { toggle(key) }) {
+                        HStack(spacing: Theme.Spacing.s) {
+                            Text(name(bridge.deviceId)).font(Theme.Font.label)
+                            Spacer(minLength: Theme.Spacing.s)
+                            Text("via \(bridge.rootPort?.abbreviatedInterface ?? "–") · cost \(bridge.rootCost)")
+                                .font(Theme.Font.caption.monospacedDigit())
+                                .foregroundStyle(Theme.Palette.textSecondary)
+                        }
+                    } detail: {
+                        Text(bridge.reason + "  Bridge ID \(bridge.bridgeId).")
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func forwarding(_ view: StpView) -> some View {
+        let ports = ordered(view.ports.filter(\.role.forwards))
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            SectionHeader("Forwarding")
+            ForEach(ports, id: \.self) { portRow($0) }
+        }
+    }
+
+    private var footnote: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(spacing: Theme.Spacing.m) {
+                ForEach([StpRole.root, .designated, .alternate], id: \.self) { role in
+                    HStack(spacing: 4) {
+                        RoleBadge(role: role, size: 13)
+                        Text(role == .root ? "root port" : role == .designated ? "designated" : "blocked")
+                    }
+                }
+            }
+            if workspace.stpFailedLink == nil {
+                Text("Right-click a cable between switches and choose Fail Link to watch the tree reconverge.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(Theme.Font.caption)
+        .foregroundStyle(Theme.Palette.textTertiary)
     }
 }
 
 struct RoleBadge: View {
     let role: StpRole
+    var size: CGFloat = 15
 
     var body: some View {
         Text(role.letter)
-            .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 15, height: 15)
+            .font(.system(size: size * 0.6, weight: .bold))
+            .foregroundStyle(role.letterColor)
+            .frame(width: size, height: size)
             .background(Circle().fill(role.color))
             .accessibilityLabel(role.title)
     }

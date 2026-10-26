@@ -25,23 +25,24 @@ where they live, so the interface can be reviewed before the engine catches up.
 
 ## Colour
 
-Neutral scale (no tint), light / dark:
+Neutral scale (no tint), light / dark. Light mode avoids pure white and black, which glare together over long sessions:
 
 | Role | Light | Dark | Used for |
 |---|---|---|---|
-| canvas | `#F5F5F5` | `#161616` | topology background |
-| canvasGrid | `#D9D9D9` | `#2B2B2B` | grid dots |
-| surface | `#FFFFFF` | `#1E1E1E` | sidebars, inspector, bottom panel |
-| surfaceRaised | `#FAFAFA` | `#242424` | headers, floating controls |
-| surfaceSunken | `#F4F4F4` | `#191919` | terminal, inset lists, status bar |
-| hover | `#F0F0F0` | `#2A2A2A` | row / tile hover |
-| border | `#E5E5E5` | `#2E2E2E` | separators |
+| canvas | `#F0F0F0` | `#161616` | topology background |
+| canvasGrid | `#D5D5D5` | `#2B2B2B` | grid dots |
+| surface | `#F9F9F9` | `#1E1E1E` | sidebars, inspector, bottom panel |
+| surfaceRaised | `#F4F4F4` | `#242424` | headers, floating controls |
+| surfaceSunken | `#EEEEEE` | `#191919` | terminal, inset lists, status bar |
+| hover | `#E9E9E9` | `#2A2A2A` | row / tile hover |
+| border | `#DFDFDF` | `#2E2E2E` | separators |
 | borderStrong | `#D4D4D4` | `#3A3A3A` | control outlines |
-| textPrimary | `#171717` | `#EDEDED` | |
+| textPrimary | `#1C1C1C` | `#EDEDED` | |
 | textSecondary | `#5C5C5C` | `#A3A3A3` | labels, captions |
 | textTertiary | `#6B6B6B` | `#8F8F8F` | hints, captions (≥ 4.8:1) |
-| symbolFill | `#FFFFFF` | `#262626` | device silhouettes |
-| symbolStroke | `#262626` | `#E0E0E0` | device outlines and detail |
+| symbolInk | `#3A3A3C` | `#D9D9D9` | solid device silhouettes (charcoal, not black) |
+| symbolKnockout | `#F0F0F0` | `#161616` | detail knocked out of silhouettes |
+| root | `#D9A400` | `#FFD60A` | spanning-tree root bridge, root ports |
 | link | `#7A7A7A` | `#7A7A7A` | cables (≥ 3:1 on canvas) |
 
 Meaningful colour:

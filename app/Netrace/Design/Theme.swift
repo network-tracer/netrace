@@ -7,23 +7,25 @@ import SwiftUI
 /// protocol). Surfaces are opaque: no vibrancy, materials or Liquid Glass.
 enum Theme {
     enum Palette {
-        static let canvas = Color(light: 0xF5F5F5, dark: 0x161616)
-        static let canvasGrid = Color(light: 0xD9D9D9, dark: 0x2B2B2B)
-        static let surface = Color(light: 0xFFFFFF, dark: 0x1E1E1E)
-        static let surfaceRaised = Color(light: 0xFAFAFA, dark: 0x242424)
-        static let surfaceSunken = Color(light: 0xF4F4F4, dark: 0x191919)
-        static let hover = Color(light: 0xF0F0F0, dark: 0x2A2A2A)
-        static let border = Color(light: 0xE5E5E5, dark: 0x2E2E2E)
+        // Light mode stays off pure white and pure black: soft greys for
+        // surfaces, charcoal for ink, so long sessions are easy on the eyes.
+        static let canvas = Color(light: 0xF0F0F0, dark: 0x161616)
+        static let canvasGrid = Color(light: 0xD5D5D5, dark: 0x2B2B2B)
+        static let surface = Color(light: 0xF9F9F9, dark: 0x1E1E1E)
+        static let surfaceRaised = Color(light: 0xF4F4F4, dark: 0x242424)
+        static let surfaceSunken = Color(light: 0xEEEEEE, dark: 0x191919)
+        static let hover = Color(light: 0xE9E9E9, dark: 0x2A2A2A)
+        static let border = Color(light: 0xDFDFDF, dark: 0x2E2E2E)
         static let borderStrong = Color(light: 0xD4D4D4, dark: 0x3A3A3A)
 
-        static let textPrimary = Color(light: 0x171717, dark: 0xEDEDED)
+        static let textPrimary = Color(light: 0x1C1C1C, dark: 0xEDEDED)
         static let textSecondary = Color(light: 0x5C5C5C, dark: 0xA3A3A3)
         /// ≥ 4.8:1 on every surface in both modes (UX-ANALYSIS.md).
         static let textTertiary = Color(light: 0x6B6B6B, dark: 0x8F8F8F)
 
         /// Device silhouettes are solid ink with detail knocked out in the canvas colour.
-        static let symbolInk = Color(light: 0x2B2B2B, dark: 0xD9D9D9)
-        static let symbolKnockout = Color(light: 0xF5F5F5, dark: 0x161616)
+        static let symbolInk = Color(light: 0x3A3A3C, dark: 0xD9D9D9)
+        static let symbolKnockout = Color(light: 0xF0F0F0, dark: 0x161616)
         /// ≥ 3:1 against the canvas, as a meaningful graphic.
         static let link = Color(light: 0x7A7A7A, dark: 0x7A7A7A)
 
@@ -32,6 +34,10 @@ enum Theme {
         static let onAccent = Color.white
 
         static let statusUp = Color(light: 0x2F9E5B, dark: 0x3DB46D)
+        /// The spanning-tree root bridge: a warm gold, deeper in light mode
+        /// so it holds its contrast on the pale canvas.
+        static let root = Color(light: 0xD9A400, dark: 0xFFD60A)
+        static let onRoot = Color(light: 0x1F1A00, dark: 0x1F1A00)
         static let statusWarning = Color(light: 0xA87300, dark: 0xE5A50A)
         static let statusDown = Color(light: 0xD93F3F, dark: 0xEF5350)
     }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Small uppercase label above groups in panels, with optional trailing content.
@@ -152,6 +153,62 @@ struct ProtocolTag: View {
     }
 }
 
+/// "ROOT" in a small gold capsule: the spanning-tree root bridge.
+struct RootBadge: View {
+    var body: some View {
+        Text("ROOT")
+            .font(.system(size: 7.5, weight: .heavy))
+            .tracking(0.4)
+            .foregroundStyle(Theme.Palette.onRoot)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1.5)
+            .background(Capsule().fill(Theme.Palette.root))
+            .overlay(Capsule().strokeBorder(Theme.Palette.canvas, lineWidth: 1))
+            .accessibilityLabel("Root bridge")
+    }
+}
+
+/// A protocol tag that shows or hides that protocol's events (in the list
+/// and on the canvas). Option-click shows only that protocol.
+struct ProtocolFilterTag: View {
+    let proto: NetProtocol
+    @ObservedObject var workspace: WorkspaceModel
+    @State private var hovering = false
+
+    var body: some View {
+        let on = workspace.visibleProtocols.contains(proto)
+        Button {
+            if NSEvent.modifierFlags.contains(.option) {
+                workspace.visibleProtocols = [proto]
+            } else if on {
+                workspace.visibleProtocols.remove(proto)
+            } else {
+                workspace.visibleProtocols.insert(proto)
+            }
+        } label: {
+            HStack(spacing: Theme.Spacing.xs + 1) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(on ? proto.color : .clear)
+                    .strokeBorder(proto.color, lineWidth: on ? 0 : 1)
+                    .frame(width: 7, height: 7)
+                Text(proto.rawValue)
+                    .font(Theme.Font.monoSmall)
+                    .foregroundStyle(on ? Theme.Palette.textPrimary : Theme.Palette.textTertiary)
+                    .strikethrough(!on, color: Theme.Palette.textTertiary)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(hovering ? Theme.Palette.hover : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.s))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(on ? "Hide \(proto.rawValue) events (⌥-click to show only \(proto.rawValue))"
+                 : "Show \(proto.rawValue) events")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
 /// Power / link state drawn with shape as well as colour, so it reads
 /// without colour vision: filled = up, half = suspended, ring = down.
 struct StatusGlyph: View {
@@ -283,3 +340,73 @@ extension Double {
         return String(format: "00:%02d:%06.3f", minutes, seconds)
     }
 }
+
+/// A row that reveals its explanation when clicked, with a chevron that
+/// turns. Explanations sit indented under the row in secondary text.
+struct ExplainRow<Header: View, Detail: View>: View {
+    let expanded: Bool
+    let action: () -> Void
+    @ViewBuilder let header: Header
+    @ViewBuilder let detail: Detail
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.xs) {
+                header
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.textTertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .opacity(hovering || expanded ? 1 : 0.5)
+                    .frame(width: 12)
+            }
+            if expanded {
+                detail
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(.leading, Theme.Spacing.s)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(Theme.Palette.border).frame(width: 2)
+                    }
+                    .transition(.opacity)
+            }
+        }
+        .padding(.vertical, 5)
+        .padding(.horizontal, 6)
+        .background(hovering ? Theme.Palette.hover : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.s))
+        .padding(.horizontal, -6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+        .onHover { hovering = $0 }
+    }
+}
+
+struct Placeholder: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(Theme.Font.caption)
+            .foregroundStyle(Theme.Palette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A number with its unit: "2 adjacencies".
+struct Stat: View {
+    let value: String
+    let label: String
+    var color: Color = Theme.Palette.textPrimary
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(value).font(Theme.Font.headline.monospacedDigit()).foregroundStyle(color)
+            Text(label).font(Theme.Font.caption).foregroundStyle(Theme.Palette.textSecondary)
+        }
+    }
+}
+
