@@ -18,6 +18,14 @@ extension DeviceKind {
         }
     }
 
+    /// Routers and switches: an IOS command line and a configuration.
+    var hasCli: Bool {
+        switch self {
+        case .router, .l2Switch, .l3Switch: true
+        default: false
+        }
+    }
+
     /// End devices with a wired NIC: they take an IP configuration and can ping.
     var isHost: Bool {
         switch self {

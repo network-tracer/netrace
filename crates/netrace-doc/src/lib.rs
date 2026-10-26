@@ -5,19 +5,37 @@
 //! reference so the rest of the app can trust the model it gets.
 
 mod annotation;
+mod config;
 mod device;
 mod error;
 mod ip;
 mod project;
+mod style;
+mod switching;
 
 pub use annotation::{Annotation, AnnotationId, AnnotationKind, Rect, RemovedAnnotation};
+pub use config::{
+    DeviceConfig, InterfaceAddress, InterfaceConfig, LineConfig, RouteTarget, StartupConfig,
+    StaticRoute, mask,
+};
 pub use device::{DeviceKind, Medium};
 pub use error::DocError;
 pub use ip::{HostIp, prefix_from_mask};
-pub use project::{Device, DeviceId, Endpoint, Link, LinkId, Point, Project, RemovedDevice};
+pub use project::{
+    CanvasItem, Device, DeviceId, DeviceSettings, Endpoint, Link, LinkId, Point, Project,
+    RemovedDevice,
+};
+pub use style::{GroupId, LinePattern, ShapeKind, ShapeStyle, Swatch};
+pub use switching::{
+    PortMode, PortSecurity, StpConfig, StpMode, SwitchportConfig, Violation, VlanConfig, VlanSet,
+};
 
 /// File inside the `.netrace` package that holds the project JSON.
 pub const PROJECT_FILE_NAME: &str = "project.json";
 
 /// Current on-disk format version. Bump when the JSON shape changes.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// 2: colours on devices and cables, styled shapes, locking and groups;
+///    router and switch configurations (running and startup).
+/// Version 1 files still load (the new fields have defaults) and are saved as 2.
+pub const FORMAT_VERSION: u32 = 2;

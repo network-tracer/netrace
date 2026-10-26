@@ -50,6 +50,14 @@ struct ProjectWindow: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: workspace.bottomPanelMaximized)
+        .sheet(isPresented: Binding(
+            get: { workspace.copyConfigSource != nil },
+            set: { if !$0 { workspace.copyConfigSource = nil } }
+        )) {
+            if let source = workspace.copyConfigSource.flatMap(document.device) {
+                CopyConfigSheet(source: source, document: document, workspace: workspace)
+            }
+        }
         .environmentObject(simulation)
         .focusedSceneObject(simulation)
         .focusedSceneObject(workspace)
@@ -58,6 +66,7 @@ struct ProjectWindow: View {
         .onChange(of: document.state) { _, state in
             workspace.prune(devices: Set(state.devices.map(\.id)), links: Set(state.links.map(\.id)),
                             annotations: Set(state.annotations.map(\.id)))
+            simulation.refreshPrompts(document: document)
             if simulation.sync(with: document) {
                 workspace.isPlaying = false
                 workspace.simulationTime = 0

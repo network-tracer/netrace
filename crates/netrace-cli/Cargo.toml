@@ -1,0 +1,12 @@
+[package]
+name = "netrace-cli"
+description = "IOS-style command line for netrace routers and switches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+netrace-doc.workspace = true
+netrace-engine.workspace = true
+netrace-sim.workspace = true

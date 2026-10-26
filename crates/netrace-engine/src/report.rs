@@ -1,17 +1,23 @@
-//! Text output for end-device commands (`ping`, `ipconfig`, `arp -a`),
-//! formatted like a Windows command prompt.
+//! Text output: end-device commands (`ping`, `tracert`, `ipconfig`,
+//! `arp -a`) formatted like a Windows command prompt, and ping / traceroute
+//! reports in Windows or IOS style.
 
 use std::net::Ipv4Addr;
+use std::time::Duration;
 
 use netrace_doc::DeviceId;
 use netrace_sim::SimTime;
 
 use crate::frame::PING_DATA_BYTES;
-use crate::{Network, PingFailure, abbreviate_port};
+use crate::probe::{MAX_HOPS, PROBES_PER_HOP, PingSession, ProbeResult, ReportStyle, SessionKind};
+use crate::{Network, Unreachable, abbreviate_port};
+
+/// Bytes in an IOS ping, as `ping` on a router reports.
+const IOS_PING_BYTES: usize = 100;
 
 impl Network {
     /// Runs one command typed at an end device's prompt and returns its output.
-    /// `ping` is scheduled at `at` and the network replayed.
+    /// `ping` and `tracert` are scheduled at `at` and the network replayed.
     pub fn host_command(&mut self, device: DeviceId, line: &str, at: SimTime) -> String {
         let words: Vec<&str> = line.split_whitespace().collect();
         match words.as_slice() {
@@ -35,15 +41,24 @@ impl Network {
                     );
                 };
                 match self.ping(device, destination, count, at) {
-                    Ok(session) => self.ping_report(session).unwrap_or_default(),
+                    Ok(session) => self.session_report(session).unwrap_or_default(),
+                    Err(e) => e.to_string(),
+                }
+            }
+            [cmd, target] if cmd.eq_ignore_ascii_case("tracert") => {
+                let Ok(destination) = target.parse::<Ipv4Addr>() else {
+                    return format!("Unable to resolve target system name {target}.");
+                };
+                match self.traceroute(device, destination, at) {
+                    Ok(session) => self.session_report(session).unwrap_or_default(),
                     Err(e) => e.to_string(),
                 }
             }
             [cmd] if cmd.eq_ignore_ascii_case("help") || *cmd == "?" => "Commands:\n  \
                  ping [-n count] <address>   Send echo requests and show the replies\n  \
+                 tracert <address>           List the routers on the way to an address\n  \
                  ipconfig                    Show this device's IP configuration\n  \
-                 arp -a                      Show the ARP cache (IP-to-MAC entries)\n\
-                 The full IOS command line for routers and switches arrives in milestone M3."
+                 arp -a                      Show the ARP cache (IP-to-MAC entries)"
                 .into(),
             [cmd, ..] => format!(
                 "'{cmd}' is not recognized as a command.\nType help to see what this device understands."
@@ -51,77 +66,44 @@ impl Network {
         }
     }
 
-    /// Windows-style output for a ping session.
-    pub fn ping_report(&self, session: u64) -> Option<String> {
+    /// A session's output, in the style of the device that ran it.
+    pub fn session_report(&self, session: u64) -> Option<String> {
         let s = self.session(session)?;
-        let mut out = format!(
-            "Pinging {} with {PING_DATA_BYTES} bytes of data:\n\n",
-            s.destination
-        );
-        let mut times = Vec::new();
-        for seq in 1..=s.count {
-            if let Some((rtt, ttl)) = s.replies.get(&seq) {
-                let ms = rtt.as_millis();
-                times.push(ms);
-                let time = if ms == 0 {
-                    "time<1ms".to_string()
-                } else {
-                    format!("time={ms}ms")
-                };
-                out += &format!(
-                    "Reply from {}: bytes={PING_DATA_BYTES} {time} TTL={ttl}\n",
-                    s.destination
-                );
-            } else {
-                match s.failures.get(&seq) {
-                    Some(PingFailure::TimedOut) => out += "Request timed out.\n",
-                    Some(PingFailure::Unreachable(reason)) if reason == "no ARP reply" => {
-                        out += "Destination host unreachable.\n"
-                    }
-                    Some(PingFailure::Unreachable(reason)) => out += &format!("{reason}\n"),
-                    None => out += "Request timed out.\n",
-                }
-            }
-        }
-        let sent = usize::from(s.count);
-        let received = times.len();
-        let lost = sent - received;
-        out += &format!(
-            "\nPing statistics for {}:\n    Packets: Sent = {sent}, Received = {received}, Lost = {lost} ({}% loss),\n",
-            s.destination,
-            lost * 100 / sent.max(1)
-        );
-        if received > 0 {
-            let min = times.iter().min().copied().unwrap_or(0);
-            let max = times.iter().max().copied().unwrap_or(0);
-            let avg = times.iter().sum::<u128>() / received as u128;
-            out += &format!(
-                "Approximate round trip times in milli-seconds:\n    Minimum = {min}ms, Maximum = {max}ms, Average = {avg}ms\n"
-            );
-        }
-        Some(out)
+        Some(match (s.kind, s.style) {
+            (SessionKind::Ping, ReportStyle::Windows) => windows_ping(s),
+            (SessionKind::Ping, ReportStyle::Ios) => ios_ping(s),
+            (SessionKind::Traceroute, ReportStyle::Windows) => windows_tracert(s),
+            (SessionKind::Traceroute, ReportStyle::Ios) => ios_traceroute(s),
+        })
+    }
+
+    /// Kept for callers that only know about pings.
+    pub fn ping_report(&self, session: u64) -> Option<String> {
+        self.session_report(session)
     }
 
     pub fn ipconfig(&self, device: DeviceId) -> String {
-        let Some(host) = self.host_view(device) else {
+        let Some(iface) = self.stack(device).and_then(|s| s.ifaces.first()) else {
             return format!("{} has no IP configuration of its own.", self.name(device));
         };
-        let port = host
-            .port
-            .map(abbreviate_port)
-            .unwrap_or_else(|| "Ethernet".into());
+        let gateway = self
+            .project
+            .device(device)
+            .and_then(|d| d.ip)
+            .and_then(|ip| ip.gateway);
         let mut out = format!(
-            "{port} Connection:\n\n   Physical Address................: {}\n",
-            host.mac
+            "{} Connection:\n\n   Physical Address................: {}\n",
+            abbreviate_port(&iface.name),
+            iface.mac
         );
-        match host.ip {
-            Some(ip) => {
+        match iface.address {
+            Some(a) => {
                 out += &format!(
                     "   IPv4 Address....................: {}\n   Subnet Mask.....................: {}\n   \
                      Default Gateway.................: {}\n",
-                    ip.address,
-                    ip.mask(),
-                    ip.gateway
+                    a.address,
+                    a.mask(),
+                    gateway
                         .map(|g| g.to_string())
                         .unwrap_or_else(|| "0.0.0.0".into())
                 );
@@ -133,20 +115,216 @@ impl Network {
 
     /// The ARP cache as it stands after everything run so far.
     pub fn arp_table(&self, device: DeviceId) -> String {
-        let Some(host) = self.host_view(device) else {
+        let Some(stack) = self.stack(device) else {
             return format!("{} has no ARP cache of its own.", self.name(device));
         };
-        if host.arp.is_empty() {
+        if stack.arp.is_empty() {
             return "No ARP Entries Found.".into();
         }
-        let mut out = format!(
-            "Interface: {}\n  Internet Address      Physical Address      Type\n",
-            host.ip.map(|i| i.address.to_string()).unwrap_or_default()
-        );
-        for (addr, mac) in host.arp {
-            let dashed = mac.to_string().replace(':', "-");
+        let own = stack
+            .ifaces
+            .first()
+            .and_then(|i| i.address)
+            .map(|a| a.address.to_string())
+            .unwrap_or_default();
+        let mut out =
+            format!("Interface: {own}\n  Internet Address      Physical Address      Type\n");
+        for (addr, entry) in &stack.arp {
+            let dashed = entry.mac.to_string().replace(':', "-");
             out += &format!("  {:<22}{:<22}dynamic\n", addr.to_string(), dashed);
         }
         out
     }
+}
+
+fn ms(rtt: Duration) -> u128 {
+    rtt.as_millis()
+}
+
+fn windows_ping(s: &PingSession) -> String {
+    let mut out = format!(
+        "Pinging {} with {PING_DATA_BYTES} bytes of data:\n\n",
+        s.destination
+    );
+    let mut times = Vec::new();
+    for seq in 1..=s.count {
+        match s.probe(seq).and_then(|p| p.result.as_ref()) {
+            Some(ProbeResult::Reply { rtt, ttl, from }) => {
+                let t = ms(*rtt);
+                times.push(t);
+                let time = if t == 0 {
+                    "time<1ms".to_string()
+                } else {
+                    format!("time={t}ms")
+                };
+                out += &format!("Reply from {from}: bytes={PING_DATA_BYTES} {time} TTL={ttl}\n");
+            }
+            Some(ProbeResult::TimeExceeded { from, .. }) => {
+                out += &format!("Reply from {from}: TTL expired in transit.\n")
+            }
+            Some(ProbeResult::Unreachable { from, code, .. }) => {
+                let what = match code {
+                    Unreachable::Network => "net",
+                    Unreachable::Host => "host",
+                };
+                out += &format!("Reply from {from}: Destination {what} unreachable.\n");
+            }
+            Some(ProbeResult::Failed(reason)) if reason == "no ARP reply" => {
+                out += "Destination host unreachable.\n"
+            }
+            Some(ProbeResult::Failed(reason)) => out += &format!("{reason}\n"),
+            Some(ProbeResult::TimedOut) | None => out += "Request timed out.\n",
+        }
+    }
+    let sent = usize::from(s.count);
+    let received = times.len();
+    let lost = sent - received;
+    out += &format!(
+        "\nPing statistics for {}:\n    Packets: Sent = {sent}, Received = {received}, Lost = {lost} ({}% loss),\n",
+        s.destination,
+        lost * 100 / sent.max(1)
+    );
+    if received > 0 {
+        let min = times.iter().min().copied().unwrap_or(0);
+        let max = times.iter().max().copied().unwrap_or(0);
+        let avg = times.iter().sum::<u128>() / received as u128;
+        out += &format!(
+            "Approximate round trip times in milli-seconds:\n    Minimum = {min}ms, Maximum = {max}ms, Average = {avg}ms\n"
+        );
+    }
+    out
+}
+
+fn ios_ping(s: &PingSession) -> String {
+    let mut out = format!(
+        "Type escape sequence to abort.\nSending {}, {IOS_PING_BYTES}-byte ICMP Echos to {}, timeout is 2 seconds:\n",
+        s.count, s.destination
+    );
+    let mut times = Vec::new();
+    for seq in 1..=s.count {
+        out.push(match s.probe(seq).and_then(|p| p.result.as_ref()) {
+            Some(ProbeResult::Reply { rtt, .. }) => {
+                times.push(ms(*rtt));
+                '!'
+            }
+            Some(ProbeResult::Unreachable { .. }) => 'U',
+            Some(ProbeResult::TimeExceeded { .. }) => '&',
+            _ => '.',
+        });
+    }
+    let received = times.len();
+    let percent = received * 100 / usize::from(s.count).max(1);
+    out += &format!(
+        "\nSuccess rate is {percent} percent ({received}/{})",
+        s.count
+    );
+    if received > 0 {
+        let min = times.iter().min().copied().unwrap_or(0);
+        let max = times.iter().max().copied().unwrap_or(0);
+        let avg = times.iter().sum::<u128>() / received as u128;
+        out += &format!(", round-trip min/avg/max = {min}/{avg}/{max} ms");
+    }
+    out.push('\n');
+    out
+}
+
+/// Probes grouped by hop: (hop, results of its three probes).
+fn hops(s: &PingSession) -> Vec<(u16, Vec<Option<&ProbeResult>>)> {
+    let last = s.probes.iter().map(|p| p.seq).max().unwrap_or(0);
+    let hop_count = last.div_ceil(PROBES_PER_HOP);
+    (1..=hop_count)
+        .map(|hop| {
+            let first = (hop - 1) * PROBES_PER_HOP + 1;
+            let results = (first..first + PROBES_PER_HOP)
+                .map(|seq| s.probe(seq).and_then(|p| p.result.as_ref()))
+                .collect();
+            (hop, results)
+        })
+        .collect()
+}
+
+fn responder(results: &[Option<&ProbeResult>]) -> Option<Ipv4Addr> {
+    results.iter().find_map(|r| match r {
+        Some(ProbeResult::Reply { from, .. })
+        | Some(ProbeResult::TimeExceeded { from, .. })
+        | Some(ProbeResult::Unreachable { from, .. }) => Some(*from),
+        _ => None,
+    })
+}
+
+fn windows_tracert(s: &PingSession) -> String {
+    let mut out = format!(
+        "\nTracing route to {} over a maximum of {MAX_HOPS} hops\n\n",
+        s.destination
+    );
+    for (hop, results) in hops(s) {
+        if let Some(Some(ProbeResult::Failed(reason))) = results.first() {
+            out += &format!("  {reason}\n");
+            continue;
+        }
+        let mut line = format!("{hop:>3}");
+        for r in &results {
+            line += &match r {
+                Some(ProbeResult::Reply { rtt, .. })
+                | Some(ProbeResult::TimeExceeded { rtt, .. })
+                | Some(ProbeResult::Unreachable { rtt, .. }) => {
+                    if ms(*rtt) == 0 {
+                        "    <1 ms".to_string()
+                    } else {
+                        format!("{:>6} ms", ms(*rtt))
+                    }
+                }
+                _ => "        *".to_string(),
+            };
+        }
+        match responder(&results) {
+            Some(from) => {
+                let unreachable = results
+                    .iter()
+                    .any(|r| matches!(r, Some(ProbeResult::Unreachable { .. })));
+                if unreachable {
+                    line += &format!("  {from} reports: Destination net unreachable.");
+                } else {
+                    line += &format!("  {from}");
+                }
+            }
+            None => line += "     Request timed out.",
+        }
+        out += &line;
+        out.push('\n');
+    }
+    if s.is_finished() {
+        out += "\nTrace complete.\n";
+    }
+    out
+}
+
+fn ios_traceroute(s: &PingSession) -> String {
+    let mut out = format!(
+        "Type escape sequence to abort.\nTracing the route to {}\nVRF info: (vrf in name/id, vrf out name/id)\n",
+        s.destination
+    );
+    for (hop, results) in hops(s) {
+        if let Some(Some(ProbeResult::Failed(reason))) = results.first() {
+            out += &format!("% {reason}\n");
+            continue;
+        }
+        let mut line = format!("{hop:>3}");
+        if let Some(from) = responder(&results) {
+            line += &format!(" {from}");
+        }
+        for r in &results {
+            line += &match r {
+                Some(ProbeResult::Reply { rtt, .. })
+                | Some(ProbeResult::TimeExceeded { rtt, .. }) => {
+                    format!(" {} msec", ms(*rtt))
+                }
+                Some(ProbeResult::Unreachable { .. }) => " !N".to_string(),
+                _ => "  *".to_string(),
+            };
+        }
+        out += &line;
+        out.push('\n');
+    }
+    out
 }

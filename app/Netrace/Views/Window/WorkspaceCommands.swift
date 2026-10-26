@@ -39,6 +39,10 @@ struct WorkspaceCommands: Commands {
             .keyboardShortcut("l", modifiers: [.command, .shift])
             Button(workspace?.showsGrid == false ? "Show Grid" : "Hide Grid") { workspace?.showsGrid.toggle() }
             Button(workspace?.showsMinimap == false ? "Show Minimap" : "Hide Minimap") { workspace?.showsMinimap.toggle() }
+            Button(workspace?.showsLayer2 == false ? "Show VLANs and Spanning Tree" : "Hide VLANs and Spanning Tree") {
+                workspace?.showsLayer2.toggle()
+            }
+            .keyboardShortcut("v", modifiers: [.command, .option])
             Divider()
             Button("Zoom In") { workspace?.zoomIn() }.keyboardShortcut("+")
             Button("Zoom Out") { workspace?.zoomOut() }.keyboardShortcut("-")
@@ -67,6 +71,37 @@ struct WorkspaceCommands: Commands {
             Divider()
             Button("Add Simple PDU") { workspace?.startPickingPDU() }
             .keyboardShortcut("p", modifiers: [.command, .shift])
+        }
+
+        CommandMenu("Arrange") {
+            let hasItems = workspace?.hasCanvasSelection ?? false
+            let hasAnnotations = !(workspace?.selectedAnnotations.isEmpty ?? true)
+            Button("Group") { workspace?.arrangeRequest = .group }
+                .keyboardShortcut("g", modifiers: [.command, .option])
+                .disabled((workspace?.selection.count ?? 0) + (workspace?.selectedAnnotations.count ?? 0) < 2)
+            Button("Ungroup") { workspace?.arrangeRequest = .ungroup }
+                .keyboardShortcut("g", modifiers: [.command, .option, .shift])
+                .disabled(!hasItems)
+            Divider()
+            Button("Bring to Front") { workspace?.arrangeRequest = .stack(.front) }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(!hasAnnotations)
+            Button("Bring Forward") { workspace?.arrangeRequest = .stack(.forward) }
+                .keyboardShortcut("f", modifiers: [.command, .option, .shift])
+                .disabled(!hasAnnotations)
+            Button("Send Backward") { workspace?.arrangeRequest = .stack(.backward) }
+                .keyboardShortcut("b", modifiers: [.command, .option, .shift])
+                .disabled(!hasAnnotations)
+            Button("Send to Back") { workspace?.arrangeRequest = .stack(.back) }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .disabled(!hasAnnotations)
+            Divider()
+            Button("Lock") { workspace?.arrangeRequest = .lock }
+                .keyboardShortcut("l")
+                .disabled(!hasAnnotations)
+            Button("Unlock") { workspace?.arrangeRequest = .unlock }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(!hasAnnotations)
         }
 
         CommandMenu("Devices") {

@@ -2,6 +2,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::{GroupId, ShapeStyle};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct AnnotationId(pub u64);
@@ -18,7 +20,7 @@ impl fmt::Display for AnnotationId {
 pub enum AnnotationKind {
     /// A text note.
     Note,
-    /// A labelled rectangle outlining a zone, VLAN or site. Drawn behind devices.
+    /// A labelled shape outlining a zone, VLAN or site. Drawn behind devices.
     Area,
 }
 
@@ -53,6 +55,14 @@ pub struct Annotation {
     pub kind: AnnotationKind,
     pub rect: Rect,
     pub text: String,
+    /// Added in format 2; older files get the original look.
+    #[serde(default)]
+    pub style: ShapeStyle,
+    /// Locked annotations can be selected but not moved or resized.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<GroupId>,
 }
 
 impl Annotation {

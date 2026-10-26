@@ -1,0 +1,31 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 20,
+  "devices": [
+    { "id": 1, "kind": "router", "name": "R1", "position": { "x": 600.0, "y": 180.0 } },
+    { "id": 2, "kind": "l2_switch", "name": "SW1", "position": { "x": 408.0, "y": 324.0 } },
+    { "id": 3, "kind": "l2_switch", "name": "SW2", "position": { "x": 792.0, "y": 324.0 } },
+    { "id": 4, "kind": "pc", "name": "PC1", "position": { "x": 312.0, "y": 468.0 },
+      "ip": { "address": "192.168.1.10", "prefix_len": 24, "gateway": "192.168.1.1" } },
+    { "id": 5, "kind": "pc", "name": "PC2", "position": { "x": 504.0, "y": 468.0 },
+      "ip": { "address": "192.168.1.11", "prefix_len": 24, "gateway": "192.168.1.1" } },
+    { "id": 6, "kind": "pc", "name": "PC3", "position": { "x": 792.0, "y": 468.0 },
+      "ip": { "address": "192.168.2.10", "prefix_len": 24, "gateway": "192.168.2.1" } }
+  ],
+  "links": [
+    { "id": 7, "a": { "device": 1, "port": "GigabitEthernet0/0" }, "b": { "device": 2, "port": "GigabitEthernet0/1" }, "medium": "copper" },
+    { "id": 8, "a": { "device": 1, "port": "GigabitEthernet0/1" }, "b": { "device": 3, "port": "GigabitEthernet0/1" }, "medium": "copper" },
+    { "id": 9, "a": { "device": 2, "port": "FastEthernet0/1" }, "b": { "device": 4, "port": "FastEthernet0" }, "medium": "copper" },
+    { "id": 10, "a": { "device": 2, "port": "FastEthernet0/2" }, "b": { "device": 5, "port": "FastEthernet0" }, "medium": "copper" },
+    { "id": 11, "a": { "device": 3, "port": "FastEthernet0/1" }, "b": { "device": 6, "port": "FastEthernet0" }, "medium": "copper" }
+  ],
+  "annotations": [
+    { "id": 12, "kind": "area", "rect": { "x": 252.0, "y": 276.0, "width": 324.0, "height": 252.0 }, "text": "LAN A · 192.168.1.0/24",
+      "style": { "shape": { "kind": "rounded_rectangle" }, "stroke": "blue", "fill": "blue", "fill_opacity": 0.06, "line": "dashed" } },
+    { "id": 13, "kind": "area", "rect": { "x": 672.0, "y": 276.0, "width": 252.0, "height": 252.0 }, "text": "LAN B · 192.168.2.0/24",
+      "style": { "shape": { "kind": "rounded_rectangle" }, "stroke": "green", "fill": "green", "fill_opacity": 0.06, "line": "dashed" } },
+    { "id": 14, "kind": "note", "rect": { "x": 24.0, "y": 72.0, "width": 312.0, "height": 132.0 },
+      "text": "Route between the LANs: open R1's console and give Gi0/0 192.168.1.1/24 and Gi0/1 192.168.2.1/24 (remember no shutdown). Then ping PC3 from PC1 and run tracert. Why does the first ping time out?" }
+  ]
+}

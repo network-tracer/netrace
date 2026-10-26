@@ -49,6 +49,12 @@ pub enum DocError {
     #[error("{0} has no Ethernet port to configure")]
     NotAHost(String),
 
+    #[error("invalid configuration: {0}")]
+    InvalidConfig(String),
+
+    #[error("{0} has no command line")]
+    NoCli(String),
+
     #[error("another device is already named \"{0}\"")]
     DuplicateName(String),
 

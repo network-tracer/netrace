@@ -15,7 +15,7 @@ final class WorkspaceModel: ObservableObject {
             case .hand: "Hand"
             case .cable: "Connect"
             case .note: "Note"
-            case .rectangle: "Area"
+            case .rectangle: "Shape"
             }
         }
 
@@ -25,7 +25,7 @@ final class WorkspaceModel: ObservableObject {
             case .hand: .system("hand.raised")
             case .cable: .custom(.cableCopper)
             case .note: .system("note.text")
-            case .rectangle: .system("rectangle.dashed")
+            case .rectangle: .system("square.on.circle")
             }
         }
 
@@ -137,8 +137,17 @@ final class WorkspaceModel: ObservableObject {
         case running, suspended, stopped
     }
 
+    /// Canvas commands from the menu bar (Arrange menu); the canvas performs
+    /// them, since it owns the undo manager.
+    enum ArrangeAction: Equatable {
+        case group, ungroup, lock, unlock
+        case stack(ProjectDocument.StackMove)
+    }
+
     // Tools and mode
     @Published var tool: Tool = .select
+    /// What the Shape tool draws.
+    @Published var shapeKind: ShapeKind = .roundedRectangle
     /// Copper by default so the Connect tool asks for ports, as CCNA labs
     /// specify them. "Automatic" in the library is the no-questions fast path.
     @Published var cableKind: CableKind = .copper
@@ -165,6 +174,8 @@ final class WorkspaceModel: ObservableObject {
     @Published var showsInterfaceLabels = true
     @Published var showsGrid = true
     @Published var showsMinimap = true
+    /// VLAN colours, trunks, blocked ports and root bridges on the canvas.
+    @Published var showsLayer2 = true
     @Published var librarySearch = ""
     @Published var topologySearch = ""
     @Published var hint: String?
@@ -172,7 +183,17 @@ final class WorkspaceModel: ObservableObject {
     // Selection
     @Published var selection: Set<UInt64> = []
     @Published var selectedLink: UInt64?
-    @Published var selectedAnnotation: UInt64?
+    /// Selected notes and shapes. Devices and annotations can be selected
+    /// together (for grouping and moving).
+    @Published var selectedAnnotations: Set<UInt64> = []
+    /// The one selected annotation, when it's the whole selection.
+    var selectedAnnotation: UInt64? {
+        selectedAnnotations.count == 1 && selection.isEmpty ? selectedAnnotations.first : nil
+    }
+    var hasCanvasSelection: Bool { !selection.isEmpty || !selectedAnnotations.isEmpty }
+    @Published var arrangeRequest: ArrangeAction?
+    /// The device whose configuration the Copy Configuration sheet copies.
+    @Published var copyConfigSource: UInt64?
     /// A simulation step shown in the packet inspector.
     @Published var selectedEvent: UInt64?
     /// Add Simple PDU: picking the source, then the destination.
@@ -239,31 +260,33 @@ final class WorkspaceModel: ObservableObject {
     func zoomOut() { setZoom((zoom / 1.25 * 100).rounded() / 100) }
 
     func selectDevices(_ ids: Set<UInt64>) {
-        selection = ids
+        select(devices: ids, annotations: [])
+    }
+
+    /// Replaces the canvas selection with devices and annotations.
+    func select(devices: Set<UInt64>, annotations: Set<UInt64>) {
+        selection = devices
+        selectedAnnotations = annotations
         selectedLink = nil
-        selectedAnnotation = nil
         selectedEvent = nil
     }
 
     func selectLink(_ id: UInt64?) {
         selectedLink = id
         selection = []
-        selectedAnnotation = nil
+        selectedAnnotations = []
         selectedEvent = nil
     }
 
     func selectAnnotation(_ id: UInt64?) {
-        selectedAnnotation = id
-        selection = []
-        selectedLink = nil
-        selectedEvent = nil
+        select(devices: [], annotations: id.map { [$0] } ?? [])
     }
 
     /// Shows a simulation step in the packet inspector and moves the clock to it.
     func selectEvent(_ event: TraceEventInfo) {
         selection = []
         selectedLink = nil
-        selectedAnnotation = nil
+        selectedAnnotations = []
         selectedEvent = event.id
         mode = .simulation
         isPlaying = false
@@ -275,7 +298,7 @@ final class WorkspaceModel: ObservableObject {
     func clearSelection() {
         selection = []
         selectedLink = nil
-        selectedAnnotation = nil
+        selectedAnnotations = []
         selectedEvent = nil
         editingAnnotation = nil
     }
@@ -329,7 +352,7 @@ final class WorkspaceModel: ObservableObject {
 
     /// Drops references to devices, links and annotations that no longer exist.
     func prune(devices: Set<UInt64>, links: Set<UInt64>, annotations: Set<UInt64>) {
-        if let id = selectedAnnotation, !annotations.contains(id) { selectedAnnotation = nil }
+        selectedAnnotations.formIntersection(annotations)
         if let id = editingAnnotation, !annotations.contains(id) { editingAnnotation = nil }
         selection.formIntersection(devices)
         if let link = selectedLink, !links.contains(link) { selectedLink = nil }

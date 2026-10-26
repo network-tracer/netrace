@@ -125,7 +125,7 @@ Meaningful colour:
 
 ## Interaction defaults
 
-- Tools: Select (V), Hand (H), Connect (C), Note (N), Area (R). Single-letter keys work while
+- Tools: Select (V), Hand (H), Connect (C), Note (N), Shape (R). Single-letter keys work while
   the canvas has focus. The toolbar uses native, customisable items (View → Customize Toolbar,
   "Icon and Text"), grouped Tools · Mode · Simulation · Panels. Device power is not on the
   toolbar, so ▶ only ever means "play the simulation".
@@ -140,9 +140,19 @@ Meaningful colour:
   ⌘A selects all; arrow keys nudge (Shift for bigger steps); hold Space and drag to pan with any
   tool. ⌘C / ⌘V / ⌘D copy, paste and duplicate devices *with the cables between them*; copies get
   fresh hostnames and land in view.
-- **Annotate:** Note tool (N) — click to place, type, click away. Area tool (R) — drag to outline a
-  zone and name it. Areas sit behind devices and only their border and label take clicks. Select
-  to move, drag the corner handle to resize, double-click to edit; all saved in the file.
+- **Annotate:** Note tool (N) — click to place, type, click away. Shape tool (R) — pick rounded
+  rectangle, rectangle, ellipse or polygon (and its number of sides) in the bar above the canvas,
+  then drag to outline a zone and name it. Shapes sit behind devices and only their border and
+  label take clicks; rectangles carry the label inside the top-left corner, round and pointed
+  shapes just above the outline. Select to move, drag the corner handle to resize, double-click
+  to edit; all saved in the file.
+- **Style:** the inspector (or the right-click menu) sets a device's colour, a cable's colour and
+  line pattern, a note's colour, and a shape's outline, border colour and pattern, fill colour and
+  opacity. Copper cables are a single line, fibre a double line.
+- **Moving together:** dragging a shape brings the devices, notes and shapes inside it. Arrange
+  menu: Group / Ungroup (⌥⌘G / ⌥⇧⌘G), Bring to Front / Forward (⇧⌘F / ⌥⇧⌘F), Send Backward / to
+  Back (⌥⇧⌘B / ⇧⌘B), Lock / Unlock (⌘L / ⌥⌘L). Drags snap to other items with guide lines, else
+  to the grid. Marquee and Shift-click select devices, shapes and notes together.
 - **Zoom and pan:** pinch zooms around the pointer; two-finger scroll (or the mouse wheel) pans,
   with momentum; ⌘-scroll zooms around the pointer; ⌘+ / ⌘− / ⌘0 and the zoom control zoom around
   the middle of the view; ⌘9 fits the topology. The canvas has no edges.
@@ -155,23 +165,34 @@ Meaningful colour:
 - **Simulate:** give end devices an address in the inspector's IP Configuration. Add PDU (toolbar,
   ⇧⌘P or the Events tab), then click the source and the destination. In Realtime the result
   appears at once; in Simulation, play or step and watch every frame travel, including flooded
-  copies, with a red ✕ where a device ignores or drops one. PCs also accept `ping`, `ipconfig`
-  and `arp -a` in their console.
+  copies, with a red ✕ where a device ignores or drops one. PCs also accept `ping`, `tracert`,
+  `ipconfig` and `arp -a` in their console.
+- **Console (routers and switches):** the IOS command line, one session per device that keeps its
+  mode while you switch tabs. `?` shows help as soon as it's typed (the line stays), Tab
+  completes, ↑ / ↓ step through history, Ctrl-Z leaves configuration mode, passwords aren't
+  echoed. Pasting several lines runs them in order. The toolbar has *Snippets* (fill-in blocks
+  of configuration, run in the right mode) and *Paste Lines*. The inspector's Interfaces tab shows
+  real up/down states and addresses, its Config tab the live running-config, with *Copy To…*
+  for duplicating a configuration with variations.
 - **Packet inspector:** selecting an event shows one plain sentence about what the device did and
   why, then a layer strip (L1–L4) where only the layers that device read or built are highlighted;
   raw fields expand on demand, with fields set by that device marked. Previous / Next steps
   through the whole ping.
 - ⌘K opens the command palette for every action and every device kind.
 
-## Planned visual language (M2.5 and later)
+## Visual language for styling and overlays
 
 - **Colour on the canvas** comes from a fixed set of system colours (blue, green, orange, red,
   purple, teal, gray) so diagrams stay legible in both modes. Chrome stays monotone; colour is
   reserved for things the user chose or that carry meaning (status, protocols, VLANs).
-- **Cable styles:** copper solid, fibre double line, console dotted, serial zig-zag, crossover
-  dashed. Colour is optional and per cable.
-- **Shapes:** rectangle, rounded rectangle, ellipse, *n*-sided polygon, line, arrow; fill, border
-  and opacity; behind devices; snapping, grouping, z-order, lock; devices inside a shape move with it.
+- **Cable styles:** copper solid, fibre double line (built); console dotted and serial zig-zag
+  when those media exist. Colour and dash pattern are optional, per cable.
+- **Shapes:** rounded rectangle, rectangle, ellipse, *n*-sided polygon (built); lines and arrows
+  later. Fill, border and opacity; behind devices; snapping, grouping, z-order, lock.
+- **VLAN overlay (built):** access cables in their VLAN's colour (a fixed palette per VLAN number,
+  VLAN 1 neutral), trunks as a striped band, an amber bar across a port spanning tree blocks, a
+  red light on an err-disabled port, a crown on each root bridge, and a legend above the zoom
+  control. A cable's own colour, if set, wins over the VLAN tint.
 - **Feature overlays** (see SCOPE.md, *Configured features are visible*): small badges at
   interfaces (NAT inside/outside, ACL shield, DHCP), VLAN tints, STP blocked-port bars, OSPF area
   outlines. Badges use SF Symbols where they exist, are 12 pt, and never cover a device name.

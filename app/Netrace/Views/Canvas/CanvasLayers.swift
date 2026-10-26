@@ -36,38 +36,53 @@ struct LinksLayer: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
     let positions: [UInt64: CGPoint]
+    /// VLANs, trunks and spanning tree, when the overlay is shown.
+    var layer2: Layer2Overlay?
 
     var body: some View {
         Canvas { context, _ in
             let kinds = Dictionary(uniqueKeysWithValues: document.state.devices.map { ($0.id, $0.kind) })
+            let ports = Dictionary((layer2?.ports ?? []).map { (PortKey(device: $0.deviceId, port: $0.port), $0) },
+                                   uniquingKeysWith: { a, _ in a })
             for link in document.state.links {
-                guard let a = positions[link.a.deviceId], let b = positions[link.b.deviceId],
+                guard let (a, b) = Self.endpoints(of: link, among: document.state.links, positions: positions),
                       let kindA = kinds[link.a.deviceId], let kindB = kinds[link.b.deviceId] else { continue }
                 let isSelected = workspace.selectedLink == link.id
                 let isCaptured = workspace.captureLink == link.id
 
-                var path = Path()
-                path.move(to: a)
-                path.addLine(to: b)
-                if isSelected {
-                    context.stroke(path, with: .color(Theme.Palette.accent.opacity(0.25)), lineWidth: 7)
-                }
-                let dash: [CGFloat] = link.medium == .fiber ? [7, 5] : []
-                context.stroke(path, with: .color(isSelected ? Theme.Palette.accent : Theme.Palette.link),
-                               style: StrokeStyle(lineWidth: isSelected ? 2 : 1.5, lineCap: .round, dash: dash))
-
                 let length = hypot(b.x - a.x, b.y - a.y)
                 guard length > 1 else { continue }
                 let dir = CGPoint(x: (b.x - a.x) / length, y: (b.y - a.y) / length)
+                let endA = ports[PortKey(device: link.a.deviceId, port: link.a.port)]
+                let endB = ports[PortKey(device: link.b.deviceId, port: link.b.port)]
+                let trunk = endA?.trunk == true || endB?.trunk == true
+                // An access link takes its VLAN's colour (VLAN 1 stays neutral).
+                let vlan = trunk ? nil : (endA?.vlan ?? endB?.vlan).flatMap { $0 == 1 ? nil : $0 }
+                Self.drawCable(link, from: a, to: b, direction: dir, isSelected: isSelected,
+                               tint: vlan.map(Self.vlanColor), trunk: trunk, in: &context)
                 let edgeA = Self.edgeDistance(kindA, dir)
                 let edgeB = Self.edgeDistance(kindB, CGPoint(x: -dir.x, y: -dir.y))
                 let state = linkState(link)
 
-                for (center, edge, sign) in [(a, edgeA, 1.0), (b, edgeB, -1.0)] {
+                for (center, edge, sign, end) in [(a, edgeA, 1.0, endA), (b, edgeB, -1.0, endB)] {
                     // Below the device sits its name label; put the light past it.
                     let offset: CGFloat = dir.y * sign > 0.5 ? 28 : 6
                     let p = CGPoint(x: center.x + dir.x * sign * (edge + offset), y: center.y + dir.y * sign * (edge + offset))
-                    Self.drawLight(in: &context, at: p, state: state)
+                    if end?.errDisabled == true {
+                        Self.drawLight(in: &context, at: p, state: .stopped)
+                    } else if end?.blocked == true {
+                        // Spanning tree: an amber bar across the cable at the blocked port.
+                        let bar = CGPoint(x: -dir.y * 7, y: dir.x * 7)
+                        let at = CGPoint(x: p.x + dir.x * sign * 9, y: p.y + dir.y * sign * 9)
+                        var path = Path()
+                        path.move(to: CGPoint(x: at.x - bar.x, y: at.y - bar.y))
+                        path.addLine(to: CGPoint(x: at.x + bar.x, y: at.y + bar.y))
+                        context.stroke(path, with: .color(Theme.Palette.statusWarning),
+                                       style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        Self.drawLight(in: &context, at: p, state: .suspended, color: Theme.Palette.statusWarning)
+                    } else {
+                        Self.drawLight(in: &context, at: p, state: state)
+                    }
                 }
 
                 if isCaptured {
@@ -106,21 +121,73 @@ struct LinksLayer: View {
         return .running
     }
 
+    /// Each medium has its own look so cables can be told apart at a glance:
+    /// copper is a single line, fibre a double line. The user's colour and
+    /// line pattern apply on top.
+    static func drawCable(_ link: LinkInfo, from a: CGPoint, to b: CGPoint, direction dir: CGPoint,
+                          isSelected: Bool, tint: Color? = nil, trunk: Bool = false,
+                          in context: inout GraphicsContext) {
+        var path = Path()
+        path.move(to: a)
+        path.addLine(to: b)
+        if isSelected {
+            context.stroke(path, with: .color(Theme.Palette.accent.opacity(0.25)), lineWidth: link.medium == .fiber ? 9 : 7)
+        }
+        // The user's own colour wins over the VLAN tint.
+        let color = isSelected ? Theme.Palette.accent : (link.color == nil ? tint ?? link.displayedColor : link.displayedColor)
+        let width: CGFloat = link.color == nil && tint == nil ? (isSelected ? 2 : 1.5) : 2
+        if trunk {
+            // A trunk carries many VLANs: a wide band with a light stripe down the middle.
+            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 4.5, lineCap: .round))
+            context.stroke(path, with: .color(Theme.Palette.canvas),
+                           style: StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [5, 4]))
+            return
+        }
+        switch link.medium {
+        case .copper:
+            let style = StrokeStyle(lineWidth: width, lineCap: .round, dash: link.displayedLine.dash(lineWidth: width))
+            context.stroke(path, with: .color(color), style: style)
+        case .fiber:
+            // Two thin rails, like a duplex fibre pair.
+            let normal = CGPoint(x: -dir.y * 1.75, y: dir.x * 1.75)
+            let rail = width * 0.7
+            let style = StrokeStyle(lineWidth: rail, lineCap: .round, dash: link.displayedLine.dash(lineWidth: rail))
+            for sign in [1.0, -1.0] {
+                var railPath = Path()
+                railPath.move(to: CGPoint(x: a.x + normal.x * sign, y: a.y + normal.y * sign))
+                railPath.addLine(to: CGPoint(x: b.x + normal.x * sign, y: b.y + normal.y * sign))
+                context.stroke(railPath, with: .color(color), style: style)
+            }
+        }
+    }
+
+    /// Colour of a VLAN on the canvas: a stable palette colour per VLAN.
+    static func vlanColor(_ vlan: UInt16) -> Color {
+        let palette: [Swatch] = [.blue, .green, .orange, .purple, .teal, .pink, .yellow, .red]
+        return palette[Int(vlan) % palette.count].color
+    }
+
+    struct PortKey: Hashable {
+        let device: UInt64
+        let port: String
+    }
+
     /// Link light with shape as well as colour (see StatusGlyph).
-    static func drawLight(in context: inout GraphicsContext, at p: CGPoint, state: WorkspaceModel.PowerState) {
+    static func drawLight(in context: inout GraphicsContext, at p: CGPoint, state: WorkspaceModel.PowerState,
+                          color: Color? = nil) {
         let outer = CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)
         let dot = Path(ellipseIn: outer.insetBy(dx: 0.75, dy: 0.75))
         context.fill(Path(ellipseIn: outer.insetBy(dx: -1, dy: -1)), with: .color(Theme.Palette.canvas))
         switch state {
         case .running:
-            context.fill(dot, with: .color(state.color))
+            context.fill(dot, with: .color((color ?? state.color)))
         case .suspended:
-            context.stroke(dot, with: .color(state.color), lineWidth: 1.6)
+            context.stroke(dot, with: .color((color ?? state.color)), lineWidth: 1.6)
             var half = context
             half.clip(to: Path(CGRect(x: outer.minX, y: outer.minY, width: outer.width / 2, height: outer.height)))
-            half.fill(dot, with: .color(state.color))
+            half.fill(dot, with: .color((color ?? state.color)))
         case .stopped:
-            context.stroke(dot, with: .color(state.color), lineWidth: 1.8)
+            context.stroke(dot, with: .color((color ?? state.color)), lineWidth: 1.8)
         }
     }
 
@@ -135,9 +202,26 @@ struct LinksLayer: View {
 
     static func hitTest(_ point: CGPoint, links: [LinkInfo], positions: [UInt64: CGPoint], tolerance: CGFloat) -> UInt64? {
         links.first { link in
-            guard let a = positions[link.a.deviceId], let b = positions[link.b.deviceId] else { return false }
+            guard let (a, b) = endpoints(of: link, among: links, positions: positions) else { return false }
             return point.distance(toSegment: a, b) <= tolerance
         }?.id
+    }
+
+    /// Where a cable is drawn. Several cables between the same two devices
+    /// (redundant links, EtherChannel candidates) fan out side by side
+    /// instead of lying on top of each other.
+    static func endpoints(of link: LinkInfo, among links: [LinkInfo], positions: [UInt64: CGPoint]) -> (CGPoint, CGPoint)? {
+        guard let a = positions[link.a.deviceId], let b = positions[link.b.deviceId] else { return nil }
+        let pair = Set([link.a.deviceId, link.b.deviceId])
+        let parallel = links.filter { Set([$0.a.deviceId, $0.b.deviceId]) == pair }
+        guard parallel.count > 1, let index = parallel.firstIndex(where: { $0.id == link.id }) else { return (a, b) }
+        // Offsets measured in a direction fixed by device order, so both ends agree.
+        let (from, to) = link.a.deviceId < link.b.deviceId ? (a, b) : (b, a)
+        let length = max(1, hypot(to.x - from.x, to.y - from.y))
+        let normal = CGPoint(x: -(to.y - from.y) / length, y: (to.x - from.x) / length)
+        let shift = (CGFloat(index) - CGFloat(parallel.count - 1) / 2) * 12
+        let offset = CGPoint(x: normal.x * shift, y: normal.y * shift)
+        return (CGPoint(x: a.x + offset.x, y: a.y + offset.y), CGPoint(x: b.x + offset.x, y: b.y + offset.y))
     }
 }
 

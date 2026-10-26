@@ -3,7 +3,8 @@ import Foundation
 /// Devices and the cables between them, as copied to the pasteboard.
 /// Stored as JSON text so it also pastes readably into a text editor.
 /// Positions are relative to the selection's centre; names are not kept
-/// (pasted devices get fresh hostnames, as hostnames must be unique).
+/// (pasted devices get fresh hostnames, as hostnames must be unique), but
+/// configurations and colours are.
 struct TopologyClipboard: Codable {
     static let marker = "netrace-clipboard/1"
 
@@ -11,6 +12,9 @@ struct TopologyClipboard: Codable {
         var kind: String
         var dx: Double
         var dy: Double
+        /// Addresses and configuration (opaque, from the core).
+        var settings: String?
+        var color: String?
     }
 
     struct Link: Codable {
@@ -26,13 +30,18 @@ struct TopologyClipboard: Codable {
     var links: [Link]
 
     /// Captures the selected devices and every cable whose both ends are selected.
-    init?(selection: Set<UInt64>, in snapshot: ProjectSnapshot) {
+    @MainActor
+    init?(selection: Set<UInt64>, in document: ProjectDocument) {
+        let snapshot = document.state
         let chosen = snapshot.devices.filter { selection.contains($0.id) }
         guard !chosen.isEmpty else { return nil }
         let cx = chosen.map(\.x).reduce(0, +) / Double(chosen.count)
         let cy = chosen.map(\.y).reduce(0, +) / Double(chosen.count)
         let index = Dictionary(uniqueKeysWithValues: chosen.enumerated().map { ($1.id, $0) })
-        devices = chosen.map { Device(kind: $0.kind.dragIdentifier, dx: $0.x - cx, dy: $0.y - cy) }
+        devices = chosen.map {
+            Device(kind: $0.kind.dragIdentifier, dx: $0.x - cx, dy: $0.y - cy,
+                   settings: document.settings(of: $0.id), color: $0.color?.identifier)
+        }
         links = snapshot.links.compactMap { link in
             guard let a = index[link.a.deviceId], let b = index[link.b.deviceId] else { return nil }
             return Link(a: a, portA: link.a.port, b: b, portB: link.b.port, fiber: link.medium == .fiber)
@@ -73,5 +82,27 @@ enum Placement {
             }
         }
         return origin
+    }
+}
+
+extension Swatch {
+    /// Stable name for the clipboard.
+    var identifier: String { title.lowercased() }
+
+    init?(identifier: String) {
+        guard let match = Swatch.allCases.first(where: { $0.identifier == identifier }) else { return nil }
+        self = match
+    }
+}
+
+extension String {
+    var jsonObject: [String: Any]? {
+        data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    }
+}
+
+extension Dictionary where Key == String, Value == Any {
+    var jsonString: String? {
+        (try? JSONSerialization.data(withJSONObject: self)).flatMap { String(data: $0, encoding: .utf8) }
     }
 }

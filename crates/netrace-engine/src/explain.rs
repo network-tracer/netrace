@@ -1,8 +1,7 @@
 //! Builders for the per-layer notes shown in the packet inspector.
 
 use crate::{
-    ArpOp, ArpPacket, Field, Frame, Icmp, IcmpKind, Ipv4Packet, Layer, LayerNote, LayerRole,
-    MacAddr, Payload,
+    ArpOp, ArpPacket, Field, Frame, Icmp, Ipv4Packet, Layer, LayerNote, LayerRole, MacAddr, Payload,
 };
 
 fn field(name: &str, value: impl ToString, changed: bool) -> Field {
@@ -47,11 +46,17 @@ pub(crate) fn data_link(role: LayerRole, note: impl Into<String>, frame: &Frame)
         layer: Layer::DataLink,
         role,
         note: note.into(),
-        fields: vec![
-            field("Destination MAC", mac_label(frame.dst), changed),
-            field("Source MAC", frame.src, changed),
-            field("Type", frame.ethertype(), changed),
-        ],
+        fields: {
+            let mut fields = vec![
+                field("Destination MAC", mac_label(frame.dst), changed),
+                field("Source MAC", frame.src, changed),
+            ];
+            if let Some(vlan) = frame.vlan {
+                fields.push(field("802.1Q tag", format!("VLAN {vlan}"), changed));
+            }
+            fields.push(field("Type", frame.ethertype(), changed));
+            fields
+        },
     }
 }
 
@@ -94,21 +99,26 @@ pub(crate) fn ipv4(role: LayerRole, note: impl Into<String>, ip: &Ipv4Packet) ->
 
 pub(crate) fn icmp(role: LayerRole, note: impl Into<String>, icmp: &Icmp) -> LayerNote {
     let changed = role == LayerRole::Changed;
-    let kind = match icmp.kind {
-        IcmpKind::EchoRequest => "8 · Echo request",
-        IcmpKind::EchoReply => "0 · Echo reply",
-    };
+    let mut fields = vec![
+        field("Protocol", "ICMP", changed),
+        field("Type", icmp.kind.label(), changed),
+        field("Code", icmp.kind.code(), changed),
+    ];
+    if icmp.kind.is_error() {
+        fields.push(field(
+            "About",
+            format!("echo request id {:#06x}, seq {}", icmp.id, icmp.seq),
+            changed,
+        ));
+    } else {
+        fields.push(field("Identifier", format!("{:#06x}", icmp.id), changed));
+        fields.push(field("Sequence", icmp.seq, changed));
+    }
     LayerNote {
         layer: Layer::Message,
         role,
         note: note.into(),
-        fields: vec![
-            field("Protocol", "ICMP", changed),
-            field("Type", kind, changed),
-            field("Code", 0, changed),
-            field("Identifier", format!("{:#06x}", icmp.id), changed),
-            field("Sequence", icmp.seq, changed),
-        ],
+        fields,
     }
 }
 

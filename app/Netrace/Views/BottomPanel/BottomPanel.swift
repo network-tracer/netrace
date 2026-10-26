@@ -65,8 +65,10 @@ private struct ConsoleTab: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
     @EnvironmentObject private var simulation: SimulationController
+    @Environment(\.undoManager) private var undoManager
     @State private var input = ""
-    @State private var history: [UInt64: [String]] = [:]
+    /// Position while stepping back through history with ↑ / ↓.
+    @State private var historyIndex: Int?
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -86,7 +88,7 @@ private struct ConsoleTab: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             let active = sessions.first { $0.id == workspace.activeConsole } ?? sessions[0]
-            let isLive = active.kind.isHost
+            let transcript = simulation.transcripts[active.id] ?? .init()
             VStack(spacing: 0) {
                 HStack(spacing: Theme.Spacing.xs) {
                     ForEach(sessions) { device in
@@ -95,6 +97,7 @@ private struct ConsoleTab: View {
                             workspace.selectDevices([device.id])
                         } onClose: {
                             workspace.consoleSessions.removeAll { $0 == device.id }
+                            simulation.closeConsole(device.id)
                             if workspace.activeConsole == device.id { workspace.activeConsole = workspace.consoleSessions.first }
                         }
                     }
@@ -109,77 +112,118 @@ private struct ConsoleTab: View {
                     .fixedSize()
                     .help("Open another console")
                     Spacer()
-                    if !isLive { PreviewBadge(milestone: "M3") }
+                    if active.kind.hasCli {
+                        SnippetMenu(device: active, document: document)
+                        Button("Paste Lines", systemImage: "doc.on.clipboard") { pasteLines(on: active) }
+                            .controlSize(.small)
+                            .help("Run each line on the clipboard as a command, like pasting a configuration (⇧⌘V)")
+                            .keyboardShortcut("v", modifiers: [.command, .shift])
+                    }
                 }
                 .padding(.horizontal, Theme.Spacing.m)
                 .padding(.vertical, Theme.Spacing.xs + 2)
                 PanelDivider(axis: .horizontal)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(isLive ? hostBanner(for: active) : PreviewData.transcript(for: active, in: document.state))
-                            .foregroundStyle(isLive ? Theme.Palette.textSecondary : Theme.Palette.textPrimary)
-                        ForEach(Array((history[active.id] ?? []).enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                        }
-                    }
-                    .font(Theme.Font.mono)
-                    .foregroundStyle(Theme.Palette.textPrimary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.Spacing.m)
+                    Text(transcript.text)
+                        .font(Theme.Font.mono)
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Spacing.m)
                 }
                 .defaultScrollAnchor(.bottom)
                 .background(Theme.Palette.surfaceSunken)
+                .contentShape(Rectangle())
+                .onTapGesture { inputFocused = true }
 
-                HStack(spacing: Theme.Spacing.xs) {
-                    Text(prompt(for: active))
+                HStack(spacing: 0) {
+                    Text(transcript.prompt)
                         .font(Theme.Font.mono)
                         .foregroundStyle(Theme.Palette.textSecondary)
-                    TextField(isLive ? "ping, ipconfig, arp -a, help" : "Type a command", text: $input)
-                        .textFieldStyle(.plain)
-                        .font(Theme.Font.mono)
-                        .focused($inputFocused)
-                        // Deferred one turn: focusing in the same pass as insertion is ignored.
-                        .onAppear { DispatchQueue.main.async { inputFocused = true } }
-                        .onChange(of: workspace.focusConsoleInput) { _, _ in
-                            DispatchQueue.main.async { inputFocused = true }
+                    Group {
+                        if transcript.secret {
+                            SecureField("", text: $input)
+                        } else {
+                            TextField(active.kind.isHost ? "ping, tracert, ipconfig, arp -a, help"
+                                                         : "Type a command, ? for help, Tab to complete", text: $input)
                         }
-                        .onSubmit { run(input, on: active) }
+                    }
+                    .textFieldStyle(.plain)
+                    .font(Theme.Font.mono)
+                    .focused($inputFocused)
+                    // Deferred one turn: focusing in the same pass as insertion is ignored.
+                    .onAppear { DispatchQueue.main.async { inputFocused = true } }
+                    .onChange(of: workspace.focusConsoleInput) { _, _ in
+                        DispatchQueue.main.async { inputFocused = true }
+                    }
+                    .onSubmit { submit(on: active) }
+                    .onChange(of: input) { _, text in typed(text, on: active) }
+                    .onKeyPress(.tab) {
+                        guard active.kind.hasCli,
+                              let completed = simulation.complete(input, on: active, document: document) else { return .handled }
+                        input = completed
+                        return .handled
+                    }
+                    .onKeyPress(.upArrow) { stepHistory(-1, transcript: transcript) }
+                    .onKeyPress(.downArrow) { stepHistory(1, transcript: transcript) }
+                    .onKeyPress(characters: CharacterSet(charactersIn: "z"), phases: .down) { press in
+                        // Ctrl-Z leaves configuration mode, as on the real console.
+                        guard press.modifiers == .control, active.kind.hasCli else { return .ignored }
+                        input = ""
+                        simulation.submit("end", on: active, document: document, undoManager: undoManager)
+                        return .handled
+                    }
                 }
                 .padding(.horizontal, Theme.Spacing.m)
                 .frame(height: 30)
                 .background(Theme.Palette.surfaceSunken)
                 .overlay(alignment: .top) { PanelDivider(axis: .horizontal) }
             }
+            .task(id: sessions.map(\.id)) {
+                for device in sessions { simulation.openConsole(device, document: document) }
+            }
         }
     }
 
-    private func run(_ line: String, on device: DeviceInfo) {
-        let command = line.trimmingCharacters(in: .whitespaces)
+    private func submit(on device: DeviceInfo) {
+        let line = input
         input = ""
-        guard !command.isEmpty else { return }
-        var lines = history[device.id] ?? []
-        lines.append("\(prompt(for: device)) \(command)")
-        if command.lowercased() == "cls" || command.lowercased() == "clear" {
-            history[device.id] = []
-            return
-        }
-        if device.kind.isHost {
-            lines.append(simulation.hostCommand(command, on: device.id))
-        } else {
-            lines.append("% The IOS command line arrives with milestone M3.")
-        }
-        history[device.id] = lines
+        historyIndex = nil
+        simulation.submit(line, on: device, document: document, undoManager: undoManager)
     }
 
-    private func prompt(for device: DeviceInfo) -> String {
-        device.kind.isHost ? "C:\\>" : PreviewData.prompt(for: device)
+    /// `?` shows help straight away (as IOS does, without Return), and a
+    /// pasted block of lines runs line by line.
+    private func typed(_ text: String, on device: DeviceInfo) {
+        guard simulation.transcripts[device.id]?.secret != true else { return }
+        if text.contains(where: \.isNewline) {
+            input = ""
+            run(lines: text, on: device)
+        } else if device.kind.hasCli, text.hasSuffix("?") {
+            let line = String(text.dropLast())
+            input = line
+            simulation.help(line, on: device, document: document)
+        }
     }
 
-    private func hostBanner(for device: DeviceInfo) -> String {
-        let address = device.ip.map { "\($0.address)/\($0.prefixLen)" } ?? "no IP address yet"
-        return "\(device.name) command prompt (\(address)). Type help for commands.\n"
+    private func pasteLines(on device: DeviceInfo) {
+        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        run(lines: text, on: device)
+        inputFocused = true
+    }
+
+    private func run(lines text: String, on device: DeviceInfo) {
+        simulation.submit(lines: text, on: device, document: document, undoManager: undoManager)
+    }
+
+    private func stepHistory(_ step: Int, transcript: SimulationController.Transcript) -> KeyPress.Result {
+        let history = transcript.history
+        guard !history.isEmpty, !transcript.secret else { return .handled }
+        let index = min(max((historyIndex ?? history.count) + step, 0), history.count)
+        historyIndex = index
+        input = index < history.count ? history[index] : ""
+        return .handled
     }
 }
 

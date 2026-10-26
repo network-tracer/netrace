@@ -202,14 +202,97 @@ extension ProjectDocument {
         Simulation(project: project)
     }
 
-    /// Everything the simulation depends on (not positions or names of
-    /// annotations), so moving a device doesn't reset a running simulation.
+    /// Everything the simulation depends on (devices, addresses,
+    /// configurations, cables), so moving a device doesn't reset a running
+    /// simulation but a configuration change does.
     var topologyKey: String {
-        let devices = state.devices.map { d in
-            "\(d.id):\(d.kind):\(d.name):\(d.ip.map { "\($0.address)/\($0.prefixLen)/\($0.gateway ?? "")" } ?? "-")"
+        String(state.simulationKey)
+    }
+
+    // MARK: Consoles (routers and switches)
+
+    func startConsole(_ console: Console) -> ConsoleResponse {
+        console.start(project: project)
+    }
+
+    func consolePrompt(_ console: Console) -> String {
+        console.prompt(project: project)
+    }
+
+    func consoleHelp(_ console: Console, line: String) -> String {
+        console.help(line: line, project: project)
+    }
+
+    func consoleComplete(_ console: Console, line: String) -> String? {
+        console.complete(line: line, project: project)
+    }
+
+    /// Runs a command line; a configuration change becomes one undo step.
+    func runConsole(_ console: Console, device id: UInt64, line: String, simulation: Simulation, at time: Double,
+                    undoManager: UndoManager?) -> ConsoleResponse {
+        let response = console.execute(line: line, project: project, simulation: simulation,
+                                       atNs: UInt64(max(0, time) * 1_000_000_000))
+        if let previous = response.previousSettings {
+            refresh()
+            let name = device(id)?.name ?? "Device"
+            registerUndo(undoManager, name: "Configure \(name)") { doc, undo in
+                doc.applySettings(id, previous, undoManager: undo)
+            }
         }
-        let links = state.links.map { "\($0.id):\($0.a.deviceId)/\($0.a.port)-\($0.b.deviceId)/\($0.b.port)" }
-        return (devices + links).joined(separator: "|")
+        return response
+    }
+
+    /// Replaces a device's name, addresses and configuration (from
+    /// `settings(of:)`), with undo.
+    @discardableResult
+    func applySettings(_ id: UInt64, _ settings: String, actionName: String? = nil,
+                       undoManager: UndoManager?) -> Result<Void, CoreError> {
+        do {
+            let current = try project.setDeviceSettings(id: id, settings: settings)
+            refresh()
+            registerUndo(undoManager, name: actionName ?? "Configure \(device(id)?.name ?? "Device")") { doc, undo in
+                doc.applySettings(id, current, actionName: actionName, undoManager: undo)
+            }
+            return .success(())
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
+    func runningConfig(of id: UInt64) -> String? {
+        project.runningConfig(device: id)
+    }
+
+    func interfaceStatus(of id: UInt64) -> [InterfaceStatusInfo] {
+        project.interfaceStatus(device: id)
+    }
+
+    func configVariables(of id: UInt64) -> [ConfigVariable] {
+        project.configVariables(device: id)
+    }
+
+    /// Gives `target` the source's configuration with its own values filled in.
+    func copyConfig(from source: UInt64, to target: UInt64, values: [ConfigVariable],
+                    undoManager: UndoManager?) -> Result<Void, CoreError> {
+        do {
+            let previous = try project.copyConfig(from: source, to: target, values: values)
+            refresh()
+            registerUndo(undoManager, name: "Copy Configuration") { doc, undo in
+                doc.applySettings(target, previous, actionName: "Copy Configuration", undoManager: undo)
+            }
+            return .success(())
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
+    /// A device's configuration as an opaque value for copy and paste.
+    func settings(of id: UInt64) -> String? {
+        try? project.deviceSettings(id: id)
     }
 
     // MARK: Annotations
@@ -219,11 +302,12 @@ extension ProjectDocument {
     }
 
     @discardableResult
-    func addAnnotation(_ kind: AnnotationKind, in rect: CGRect, text: String, undoManager: UndoManager?) -> AnnotationInfo {
+    func addAnnotation(_ kind: AnnotationKind, in rect: CGRect, text: String, style: ShapeStyle = defaultShapeStyle(),
+                       undoManager: UndoManager?) -> AnnotationInfo {
         let annotation = project.addAnnotation(kind: kind, x: rect.minX, y: rect.minY,
-                                               width: rect.width, height: rect.height, text: text)
+                                               width: rect.width, height: rect.height, text: text, style: style)
         refresh()
-        registerUndo(undoManager, name: kind == .note ? "Add Note" : "Add Area") { doc, undo in
+        registerUndo(undoManager, name: kind == .note ? "Add Note" : "Add \(style.shape.title)") { doc, undo in
             doc.removeAnnotation(annotation.id, undoManager: undo)
         }
         return annotation
@@ -244,7 +328,7 @@ extension ProjectDocument {
     func removeAnnotation(_ id: UInt64, undoManager: UndoManager?) {
         guard let removed = try? project.removeAnnotation(id: id) else { return }
         refresh()
-        registerUndo(undoManager, name: removed.annotation.kind == .note ? "Delete Note" : "Delete Area") { doc, undo in
+        registerUndo(undoManager, name: removed.annotation.kind == .note ? "Delete Note" : "Delete Shape") { doc, undo in
             doc.restoreAnnotation(removed, undoManager: undo)
         }
     }
@@ -255,6 +339,161 @@ extension ProjectDocument {
         registerUndo(undoManager, name: "Restore") { doc, undo in
             doc.removeAnnotation(removed.annotation.id, undoManager: undo)
         }
+    }
+
+    // MARK: Styling and arranging
+
+    func setAnnotationStyle(_ id: UInt64, to style: ShapeStyle, actionName: String = "Change Style",
+                            undoManager: UndoManager?) {
+        guard annotation(id)?.style != style,
+              let previous = try? project.setAnnotationStyle(id: id, style: style) else { return }
+        refresh()
+        registerUndo(undoManager, name: actionName) { doc, undo in
+            doc.setAnnotationStyle(id, to: previous, actionName: actionName, undoManager: undo)
+        }
+    }
+
+    func setAnnotationsLocked(_ ids: Set<UInt64>, _ locked: Bool, undoManager: UndoManager?) {
+        let changed = ids.filter { annotation($0)?.locked == !locked }
+        for id in changed { _ = try? project.setAnnotationLocked(id: id, locked: locked) }
+        guard !changed.isEmpty else { return }
+        refresh()
+        registerUndo(undoManager, name: locked ? "Lock" : "Unlock") { doc, undo in
+            doc.setAnnotationsLocked(changed, !locked, undoManager: undo)
+        }
+    }
+
+    enum StackMove { case front, forward, backward, back }
+
+    /// Changes an annotation's place in the stacking order.
+    func reorderAnnotation(_ id: UInt64, _ move: StackMove, undoManager: UndoManager?) {
+        guard let index = state.annotations.firstIndex(where: { $0.id == id }) else { return }
+        let target: Int = switch move {
+        case .front: state.annotations.count - 1
+        case .forward: min(index + 1, state.annotations.count - 1)
+        case .backward: max(index - 1, 0)
+        case .back: 0
+        }
+        guard target != index else { return }
+        moveAnnotation(id, toIndex: target, actionName: move.title, undoManager: undoManager)
+    }
+
+    private func moveAnnotation(_ id: UInt64, toIndex index: Int, actionName: String, undoManager: UndoManager?) {
+        guard let previous = try? project.reorderAnnotation(id: id, index: UInt64(index)) else { return }
+        refresh()
+        registerUndo(undoManager, name: actionName) { doc, undo in
+            doc.moveAnnotation(id, toIndex: Int(previous), actionName: actionName, undoManager: undo)
+        }
+    }
+
+    func setDeviceColor(_ ids: Set<UInt64>, to color: Swatch?, undoManager: UndoManager?) {
+        var previous: [UInt64: Swatch?] = [:]
+        for id in ids where device(id).map({ $0.color != color }) ?? false {
+            // Not `try?`: it would flatten a previous `nil` colour into a failure.
+            do { previous[id] = .some(try project.setDeviceColor(id: id, color: color)) } catch {}
+        }
+        guard !previous.isEmpty else { return }
+        refresh()
+        registerUndo(undoManager, name: "Change Colour") { doc, undo in
+            doc.restoreDeviceColors(previous, undoManager: undo)
+        }
+    }
+
+    private func restoreDeviceColors(_ colors: [UInt64: Swatch?], undoManager: UndoManager?) {
+        var previous: [UInt64: Swatch?] = [:]
+        for (id, color) in colors {
+            do { previous[id] = .some(try project.setDeviceColor(id: id, color: color)) } catch {}
+        }
+        refresh()
+        registerUndo(undoManager, name: "Change Colour") { doc, undo in
+            doc.restoreDeviceColors(previous, undoManager: undo)
+        }
+    }
+
+    func setLinkStyle(_ id: UInt64, to style: LinkStyle, undoManager: UndoManager?) {
+        guard let link = link(id), link.color != style.color || link.line != style.line,
+              let previous = try? project.setLinkStyle(id: id, style: style) else { return }
+        refresh()
+        registerUndo(undoManager, name: "Change Cable Style") { doc, undo in
+            doc.setLinkStyle(id, to: previous, undoManager: undo)
+        }
+    }
+
+    /// Puts devices and annotations in one new group (two or more items).
+    func group(devices: Set<UInt64>, annotations: Set<UInt64>, undoManager: UndoManager?) {
+        guard devices.count + annotations.count > 1 else { return }
+        let group = project.newGroupId()
+        setGroups(items(devices: devices, annotations: annotations).map { GroupMembership(item: $0, group: group) },
+                  actionName: "Group", undoManager: undoManager)
+    }
+
+    func ungroup(devices: Set<UInt64>, annotations: Set<UInt64>, undoManager: UndoManager?) {
+        setGroups(items(devices: devices, annotations: annotations).map { GroupMembership(item: $0, group: nil) },
+                  actionName: "Ungroup", undoManager: undoManager)
+    }
+
+    private func setGroups(_ changes: [GroupMembership], actionName: String, undoManager: UndoManager?) {
+        guard !changes.isEmpty, let previous = try? project.setGroups(changes: changes) else { return }
+        refresh()
+        registerUndo(undoManager, name: actionName) { doc, undo in
+            doc.setGroups(previous, actionName: actionName, undoManager: undo)
+        }
+    }
+
+    private func items(devices: Set<UInt64>, annotations: Set<UInt64>) -> [CanvasItem] {
+        devices.sorted().map { .device(id: $0) } + annotations.sorted().map { .annotation(id: $0) }
+    }
+
+    /// Every device and annotation sharing a group with any of the given items.
+    func expandingGroups(devices: Set<UInt64>, annotations: Set<UInt64>) -> (devices: Set<UInt64>, annotations: Set<UInt64>) {
+        let groups = Set(state.devices.filter { devices.contains($0.id) }.compactMap(\.group)
+            + state.annotations.filter { annotations.contains($0.id) }.compactMap(\.group))
+        guard !groups.isEmpty else { return (devices, annotations) }
+        return (devices.union(state.devices.filter { $0.group.map(groups.contains) ?? false }.map(\.id)),
+                annotations.union(state.annotations.filter { $0.group.map(groups.contains) ?? false }.map(\.id)))
+    }
+
+    /// What moves along with an area: devices whose centre lies inside its
+    /// outline, and annotations above it in the stack that sit inside it,
+    /// recursively (an area inside an area brings its own contents).
+    func contents(ofAreas areas: Set<UInt64>) -> (devices: Set<UInt64>, annotations: Set<UInt64>) {
+        var devices = Set<UInt64>()
+        var annotations = Set<UInt64>()
+        var queue = Array(areas)
+        while let id = queue.popLast() {
+            guard let index = state.annotations.firstIndex(where: { $0.id == id }) else { continue }
+            let area = state.annotations[index]
+            guard area.kind == .area else { continue }
+            let outline = area.style.shape.path(in: area.rect)
+            devices.formUnion(state.devices.filter { outline.contains($0.position) }.map(\.id))
+            for inner in state.annotations[(index + 1)...]
+            where !annotations.contains(inner.id) && !areas.contains(inner.id) && !inner.locked
+                && area.rect.contains(inner.rect) && outline.contains(CGPoint(x: inner.rect.midX, y: inner.rect.midY)) {
+                annotations.insert(inner.id)
+                queue.append(inner.id)
+            }
+        }
+        return (devices, annotations)
+    }
+
+    /// Moves devices and annotations by one offset as a single undo step.
+    func moveItems(devices: Set<UInt64>, annotations: Set<UInt64>, by delta: CGSize, actionName: String,
+                   undoManager: UndoManager?) {
+        guard delta != .zero else { return }
+        undoManager?.beginUndoGrouping()
+        for id in devices {
+            guard let device = device(id) else { continue }
+            moveDevice(id, to: CGPoint(x: device.x + delta.width, y: device.y + delta.height), undoManager: undoManager)
+        }
+        for id in annotations {
+            guard let annotation = annotation(id), !annotation.locked else { continue }
+            updateAnnotation(id, rect: annotation.rect.offsetBy(dx: delta.width, dy: delta.height), text: annotation.text,
+                             actionName: actionName, undoManager: undoManager)
+        }
+        if let undoManager, !undoManager.isUndoing, !undoManager.isRedoing {
+            undoManager.setActionName(actionName)
+        }
+        undoManager?.endUndoGrouping()
     }
 
     // MARK: Copy and paste
@@ -268,7 +507,17 @@ extension ProjectDocument {
         for item in clipboard.devices {
             guard let kind = DeviceKind(dragIdentifier: item.kind) else { continue }
             let point = CGPoint(x: center.x + item.dx, y: center.y + item.dy).snapped
-            ids.append(addDevice(kind, at: point, undoManager: undoManager).id)
+            let device = addDevice(kind, at: point, undoManager: undoManager)
+            ids.append(device.id)
+            // The copy keeps the configuration under its own new hostname.
+            if let settings = item.settings, var fields = settings.jsonObject {
+                fields["name"] = device.name
+                fields["startup"] = nil
+                if let json = fields.jsonString { applySettings(device.id, json, undoManager: undoManager) }
+            }
+            if let color = item.color.flatMap(Swatch.init(identifier:)) {
+                setDeviceColor([device.id], to: color, undoManager: undoManager)
+            }
         }
         for link in clipboard.links where ids.indices.contains(link.a) && ids.indices.contains(link.b) {
             _ = connect(ids[link.a], ids[link.b], portA: link.portA, portB: link.portB,
@@ -297,6 +546,17 @@ extension ProjectDocument {
         // name over to the inverse; renaming it would mislabel the Edit menu.
         if !undoManager.isUndoing && !undoManager.isRedoing {
             undoManager.setActionName(name)
+        }
+    }
+}
+
+extension ProjectDocument.StackMove {
+    var title: String {
+        switch self {
+        case .front: "Bring to Front"
+        case .forward: "Bring Forward"
+        case .backward: "Send Backward"
+        case .back: "Send to Back"
         }
     }
 }

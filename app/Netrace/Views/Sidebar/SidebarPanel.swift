@@ -81,7 +81,7 @@ private struct LibraryView: View {
                             .padding(.bottom, Theme.Spacing.s - Theme.Spacing.xxs)
                         PaletteRow(glyph: WorkspaceModel.Tool.note.glyph, title: "Note", subtitle: "Text on the canvas",
                                    isActive: workspace.tool == .note) { workspace.tool = .note }
-                        PaletteRow(glyph: WorkspaceModel.Tool.rectangle.glyph, title: "Area", subtitle: "Outline a zone, VLAN or site",
+                        PaletteRow(glyph: WorkspaceModel.Tool.rectangle.glyph, title: "Shape", subtitle: "Outline a zone: box, ellipse, polygon",
                                    isActive: workspace.tool == .rectangle) { workspace.tool = .rectangle }
                     }
                 }
@@ -228,7 +228,7 @@ private struct OutlineDeviceRow: View {
         let size = DeviceSymbol.size(for: device.kind)
         let power = workspace.powerState(device.id)
         HStack(spacing: Theme.Spacing.s) {
-            DeviceSymbolView(kind: device.kind, scale: min(22 / size.width, 16 / size.height))
+            DeviceSymbolView(kind: device.kind, scale: min(22 / size.width, 16 / size.height), tint: device.color)
                 .frame(width: 24)
             Text(device.name)
                 .font(Theme.Font.body)

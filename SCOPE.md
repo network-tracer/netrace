@@ -85,20 +85,82 @@ it acts on a packet in Simulation mode. Markers can be switched off per feature 
 | OSPF | Areas outlined (from the config) and neighbour adjacencies drawn as a thin overlay | Hellos and LSAs animate; DR / BDR marked |
 | Routing | Hover a router to see its routes highlighted as paths on the diagram | The route that matched is named in the hop explanation |
 
+## Command line and routing (built in M3)
+
+- **Engine:** one IP stack shared by end devices, routers and a switch's `interface Vlan1`:
+  connected, local, static (next hop or exit interface, recursive), floating static (distance)
+  and default routes; longest-prefix match; TTL; ARP on every interface. Routers drop the packet
+  that triggers ARP, as IOS does, so the first ping across a router times out, and the trace
+  says why. ICMP Time Exceeded and Destination Unreachable back to the source. `shutdown`
+  takes a link down at both ends.
+- **Pings and traceroute:** PCs print Windows `ping` / `tracert`; routers and switches print IOS
+  (`!!!!!`, `Success rate is …`, three probes per hop).
+- **CLI** (`netrace-cli` crate): user / privileged / config / interface / subinterface / line
+  modes with IOS prompts; unique abbreviations; `?` (both `sh?` and `show ?`), Tab, `do`, `no`
+  forms; `% Invalid input detected at '^' marker.`, `% Incomplete command.`, `% Ambiguous
+  command`; the domain-lookup delay on mistyped words (`no ip domain-lookup` removes it);
+  `enable secret` and console `login` password prompts; `banner motd` with delimiters;
+  `copy run start` with its filename prompt, `reload` with save / confirm prompts, `write`,
+  `erase startup-config`; interface up/down console messages; type 7 password display.
+- **show:** `running-config`, `startup-config`, `ip interface brief`, `ip route` (codes legend,
+  gateway of last resort, classful grouping), `interfaces`, `arp`, `mac address-table`,
+  `version`, `history`.
+- **Saved in the file:** running and startup configuration of every router and switch; undo
+  covers every configuration change made in a console.
+- **Faster configuration:** paste many lines at once (or *Paste Lines*, ⇧⌘V); snippets with
+  `{{Field=default}}` placeholders, built in and user-written, filled in from a short form and run
+  in the right mode; *Copy Configuration To…* gives other devices of the same model one
+  device's configuration with only hostnames, interface addresses and gateway changed, from a
+  grid with suggested values; copy / paste of devices keeps their configuration.
+
+## Switching (built in M4)
+
+- **VLANs:** VLAN database (`vlan 10`, `name`), access ports, 802.1Q trunks with native VLAN and
+  allowed lists (`add` / `remove`); frames carry a real tag on trunks and the inspector shows it;
+  flooding and MAC learning stay inside a VLAN; a missing VLAN, a disallowed VLAN or a tagged
+  frame on an access port is dropped with the reason. No DTP: `dynamic auto` acts as access.
+- **Inter-VLAN routing:** router subinterfaces (`encapsulation dot1Q N [native]`) and layer 3
+  switch SVIs with `ip routing`, plus routed ports (`no switchport`); switch `Vlan` interfaces
+  are up only while a port in their VLAN is up and forwarding.
+- **Spanning tree:** PVST+ / Rapid PVST+, one tree per VLAN computed in its converged state (no
+  waiting for timers): root election by priority and MAC, root / designated / alternate / backup
+  ports with 802.1D costs and tie-breaks, hubs treated as shared segments. Blocked ports drop
+  data frames, and the trace says why. Priorities, `root primary` / `secondary`, PortFast,
+  BPDU guard (err-disables an edge port that faces a switch, taking its link down).
+- **Port security:** maximum, sticky, static MACs, shutdown / restrict / protect; a violation in
+  shutdown mode err-disables the port for the rest of the replay.
+- **CDP / LLDP:** neighbours from the cabling (CDP on by default, LLDP after `lldp run` on both
+  ends; PCs don't take part), `no cdp enable` per port.
+- **CLI:** `vlan` mode, `interface range`, all the above commands, and `show vlan [brief]`,
+  `show interfaces trunk | status | X switchport`, `show spanning-tree [vlan N]`,
+  `show cdp neighbors [detail]`, `show lldp neighbors`, `show port-security [interface X | address]`,
+  `show mac address-table` by VLAN; the running-config carries every switching setting.
+- **Canvas:** access cables take their VLAN's colour, trunks are a striped band, a blocked port
+  has an amber bar and light, an err-disabled port a red light, the root bridge a crown, with a
+  legend (View → Hide VLANs and Spanning Tree, ⌥⌘V). Parallel cables between two devices fan out.
+- **Snippets:** create VLANs, access ports, trunk port, router-on-a-stick subinterface, port security.
+- Later: BPDUs and convergence animated in Simulation mode, EtherChannel, VTP, voice VLAN.
+
 ## Canvas styling
 
-- **Shapes:** rectangle, rounded rectangle, ellipse, polygon with *n* sides (3–12), line and
-  arrow, each with a fill colour, border colour and style (solid, dashed, dotted) and opacity.
-- **How shapes interact:** shapes sit behind devices and cables; z-order (bring forward / send
-  back); snap to the grid and to other shapes' edges and centres; a device dropped inside a shape
-  belongs to it, so moving the shape moves its devices (like areas today), and nested shapes
-  nest; overlapping shapes blend, never hide devices; group / ungroup (⌘G); lock to stop
-  accidental moves.
-- **Colours:** a small fixed palette (system colours) for devices, shapes, notes and labels, so
-  diagrams stay readable in light and dark mode. Device symbols stay solid silhouettes, tinted.
-- **Cables:** each type has its own look so they can be told apart at a glance: copper solid,
-  fibre double line, console dotted, serial zig-zag, crossover dashed; optional per-cable colour
-  and label. Wireless associations drawn as faint dashed arcs.
+Built in M2.5 (file format 2; format 1 files still open):
+
+- **Shapes:** rounded rectangle, rectangle, ellipse and regular polygons with 3–12 sides, each
+  with a border colour and style (solid, dashed, dotted), a fill colour and fill opacity.
+- **How shapes interact:** shapes sit behind cables and devices, in a z-order you can change
+  (bring to front / forward, send backward / to back); dragging snaps to other devices' centres
+  and shapes' edges and centres, with guide lines, and otherwise to the grid; devices whose
+  centre is inside a shape move with it, and so do shapes and notes inside it (nesting works);
+  overlapping fills blend, never hide devices; group / ungroup (⌥⌘G) makes devices, shapes and
+  notes select and move together; lock (⌘L) stops a shape or note moving or resizing.
+- **Colours:** a fixed palette of nine system colours for devices (tinting the solid symbol),
+  shape borders and fills, notes and cables, readable in light and dark mode.
+- **Cables:** copper is a single line, fibre a double line; each cable can take a colour and a
+  dashed or dotted pattern.
+
+Later, as the media and features arrive: console cables dotted, serial zig-zag, wireless
+associations as faint arcs, per-cable labels, lines and arrows as annotations, copying shapes
+and notes with ⌘C / ⌘V.
 
 ## After v1.0: enterprise track (CCNP)
 
@@ -220,9 +282,9 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | M0 ✅ | Foundation | Cargo workspace with event scheduler and tests, UniFFI bindings built into an XCFramework by one script, Xcode app links it, `.netrace` document opens and saves |
 | M1 ✅ | Canvas | Place, cable (with port choice), rename, arrange and annotate devices: notes and areas saved in the document, marquee selection, copy/paste/duplicate keeping cables between copies, arrow-key nudging, semantic zoom, new devices placed in view, Space-drag panning; all undoable |
 | M2 ✅ | Layer 2 + ARP/ICMP | Two PCs on a switch ping each other; visualiser v1 shows the ARP + ICMP exchange with the plain-language packet inspector |
-| M2.5 | Canvas styling | Shapes (incl. *n*-sided polygons) with colours and interaction rules, device and note colours, distinct cable styles; smooth pinch / scroll zoom anchored at the pointer |
-| M3 | CLI + routing | IOS parser, router interfaces, static routes, traceroute, subinterfaces, SVIs; multi-line paste, config snippets, configs saved in the file, duplicate with variations |
-| M4 | Switching | VLANs, trunks, STP, CDP/LLDP, port security; VLAN tinting and STP markers on the canvas |
+| M2.5 ✅ | Canvas styling | Shapes (incl. *n*-sided polygons) with colours and interaction rules, device and note colours, distinct cable styles; smooth pinch / scroll zoom anchored at the pointer |
+| M3 ✅ | CLI + routing | IOS parser, router interfaces, static routes, traceroute, subinterfaces, SVIs; multi-line paste, config snippets, configs saved in the file, duplicate with variations. Subinterfaces and SVIs other than Vlan1 are configured and saved now and carry traffic once trunks arrive (M4) |
+| M4 ✅ | Switching | VLANs, trunks, STP, CDP/LLDP, port security; VLAN tinting and STP markers on the canvas; router-on-a-stick and SVI routing |
 | M5 | Services | DHCP, ACLs, NAT/PAT, OSPF, each with its canvas markers and visualiser effects |
 | M6 | Labs + polish | Lab engine, 20 labs, performance pass, beta |
 

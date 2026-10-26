@@ -11,13 +11,14 @@ struct InspectorPanel: View {
         Group {
             if let id = workspace.selectedEvent, let event = simulation.event(id) {
                 PacketInspector(event: event, document: document, workspace: workspace)
-            } else if workspace.selection.count == 1, let id = workspace.selection.first, let device = document.device(id) {
+            } else if workspace.selection.count == 1, workspace.selectedAnnotations.isEmpty,
+                      let id = workspace.selection.first, let device = document.device(id) {
                 DeviceInspector(device: device, document: document, workspace: workspace)
             } else if let id = workspace.selectedAnnotation, let annotation = document.annotation(id) {
                 AnnotationInspector(annotation: annotation, document: document, workspace: workspace)
             } else if let id = workspace.selectedLink, let link = document.link(id) {
                 LinkInspector(link: link, document: document, workspace: workspace)
-            } else if workspace.selection.count > 1 {
+            } else if workspace.selection.count + workspace.selectedAnnotations.count > 1 {
                 SelectionInspector(document: document, workspace: workspace)
             } else {
                 ProjectInspector(document: document, workspace: workspace)
@@ -99,6 +100,7 @@ private struct DeviceInspector: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
     @EnvironmentObject private var simulation: SimulationController
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         let power = workspace.powerState(device.id)
@@ -107,7 +109,7 @@ private struct DeviceInspector: View {
             InspectorHeader(subtitle: device.kind.displayName) {
                 EditableDeviceName(device: device, document: document, workspace: workspace)
             } leading: {
-                DeviceSymbolView(kind: device.kind, scale: min(44 / size.width, 36 / size.height))
+                DeviceSymbolView(kind: device.kind, scale: min(44 / size.width, 36 / size.height), tint: device.color)
             } trailing: {
                 PowerPill(state: power)
             }
@@ -170,32 +172,44 @@ private struct DeviceInspector: View {
             }
         }
         InspectorSection("Canvas") {
+            StyleRow("Colour") {
+                SwatchPicker(selection: device.color) { color in
+                    document.setDeviceColor([device.id], to: color, undoManager: undoManager)
+                }
+            }
             KeyValueRow("Position", "\(Int(device.x)), \(Int(device.y))", mono: true)
             KeyValueRow("ID", "#\(device.id)", mono: true)
+            if device.group != nil {
+                Button("Ungroup", systemImage: "rectangle.3.group") { workspace.arrangeRequest = .ungroup }
+                    .controlSize(.small)
+            }
         }
     }
 
     @ViewBuilder
     private var interfaces: some View {
         let links = document.links(attachedTo: device.id)
-        InspectorSection("Interfaces", trailing: { if !device.kind.isHost { PreviewBadge(milestone: "M3") } }) {
+        let status = device.kind.hasCli ? document.interfaceStatus(of: device.id) : []
+        InspectorSection("Interfaces") {
             if device.kind.ports.isEmpty {
                 Text("Wireless only. Wi-Fi association arrives after v1.")
                     .font(Theme.Font.caption)
                     .foregroundStyle(Theme.Palette.textSecondary)
             }
             VStack(spacing: 0) {
-                ForEach(device.kind.ports, id: \.self) { port in
+                let names = device.kind.hasCli ? status.map(\.name) : device.kind.ports
+                ForEach(names, id: \.self) { port in
                     let link = links.first { $0.endpoint(for: device.id)?.port == port }
                     let peer = link.flatMap { document.device($0.otherEnd(from: device.id).deviceId) }
+                    let row = status.first { $0.name == port }
                     HStack(spacing: Theme.Spacing.s) {
                         IconView(.port, size: 14)
-                            .foregroundStyle(link != nil ? Theme.Palette.statusUp : Theme.Palette.textTertiary)
+                            .foregroundStyle(portColor(row: row, connected: link != nil))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(port.abbreviatedInterface)
                                 .font(Theme.Font.mono)
                                 .foregroundStyle(Theme.Palette.textPrimary)
-                            Text(interfaceStatus(port: port, connected: link != nil))
+                            Text(row.map(statusLine) ?? interfaceStatus(port: port, connected: link != nil))
                                 .font(Theme.Font.caption)
                                 .foregroundStyle(Theme.Palette.textTertiary)
                         }
@@ -209,13 +223,27 @@ private struct DeviceInspector: View {
                     .padding(.horizontal, Theme.Spacing.m)
                     .padding(.vertical, Theme.Spacing.s - 2)
                     .help(port)
-                    if port != device.kind.ports.last {
+                    if port != names.last {
                         PanelDivider(axis: .horizontal).padding(.leading, Theme.Spacing.m + 22)
                     }
                 }
             }
             .background(Theme.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
         }
+    }
+
+    private func portColor(row: InterfaceStatusInfo?, connected: Bool) -> Color {
+        guard let row else { return connected ? Theme.Palette.statusUp : Theme.Palette.textTertiary }
+        if row.status == "up" && row.protocol == "up" { return Theme.Palette.statusUp }
+        if row.status == "administratively down" { return Theme.Palette.statusDown }
+        return Theme.Palette.textTertiary
+    }
+
+    /// "up/up · 192.168.1.1/24", as `show ip interface brief` would say.
+    private func statusLine(_ row: InterfaceStatusInfo) -> String {
+        let state = row.status == "administratively down" ? "shut down" : "\(row.status)/\(row.protocol)"
+        let address = row.address.map { "\($0)/\(row.prefixLen ?? 0)" }
+        return [state, address, row.description].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// Status line for a port; end devices show their real address.
@@ -229,21 +257,30 @@ private struct DeviceInspector: View {
 
     @ViewBuilder
     private var config: some View {
-        let text = PreviewData.runningConfig(for: device, in: document.state)
-        InspectorSection("Running configuration", trailing: { PreviewBadge(milestone: "M3") }) {
-            Text(text)
-                .font(Theme.Font.monoSmall)
-                .foregroundStyle(Theme.Palette.textPrimary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(Theme.Spacing.m)
-                .background(Theme.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+        let text = document.runningConfig(of: device.id) ?? "\(device.name) has no configuration of its own."
+        InspectorSection("Running configuration") {
+            // Configuration lines never wrap, as in a terminal; scroll sideways for long ones.
+            ScrollView(.horizontal) {
+                Text(text)
+                    .font(Theme.Font.monoSmall)
+                    .foregroundStyle(Theme.Palette.textPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize()
+                    .padding(Theme.Spacing.m)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
             HStack {
                 Button("Copy", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
                 Button("Open in Console", systemImage: "terminal") { workspace.openConsole(for: device.id) }
+                if device.kind.hasCli {
+                    Button("Copy To…", systemImage: "doc.on.doc.fill") { workspace.copyConfigSource = device.id }
+                        .help("Give other devices this configuration, changing only names and addresses")
+                        .disabled(!document.state.devices.contains { $0.kind == device.kind && $0.id != device.id })
+                }
             }
             .controlSize(.small)
         }
@@ -404,7 +441,7 @@ private struct PacketInspector: View {
                             subtitle: "\(event.outcome.title) · \(String(format: "%.3f", event.time)) s") {
                 if let device {
                     let size = DeviceSymbol.size(for: device.kind)
-                    DeviceSymbolView(kind: device.kind, scale: min(44 / size.width, 36 / size.height))
+                    DeviceSymbolView(kind: device.kind, scale: min(44 / size.width, 36 / size.height), tint: device.color)
                 }
             } trailing: {
                 if let proto = event.netProtocol { ProtocolTag(proto: proto) }
@@ -575,6 +612,24 @@ private struct LinkInspector: View {
                         endpoint(link.b)
                     }
 
+                    InspectorSection("Appearance") {
+                        StyleRow("Colour") {
+                            SwatchPicker(selection: link.color) { color in
+                                document.setLinkStyle(link.id, to: LinkStyle(color: color, line: link.line),
+                                                      undoManager: undoManager)
+                            }
+                        }
+                        StyleRow("Line") {
+                            LinePatternPicker(selection: link.displayedLine) { line in
+                                document.setLinkStyle(link.id, to: LinkStyle(color: link.color, line: line == .solid ? nil : line),
+                                                      undoManager: undoManager)
+                            }
+                        }
+                        Text(link.medium == .fiber ? "Fibre cables are drawn as a double line." : "Copper cables are drawn as a single line.")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textTertiary)
+                    }
+
                     InspectorSection("Capture") {
                         if workspace.captureLink == link.id {
                             Button("Stop Capture", systemImage: "stop.fill") { workspace.captureLink = nil }
@@ -664,20 +719,31 @@ private struct AnnotationInspector: View {
     @State private var draft = ""
     @FocusState private var focused: Bool
 
+    private var isNote: Bool { annotation.kind == .note }
+    private var style: ShapeStyle { annotation.style }
+    private var name: String { isNote ? "Note" : style.shape.title }
+
     var body: some View {
-        let isNote = annotation.kind == .note
         VStack(spacing: 0) {
-            InspectorHeader(title: isNote ? "Note" : "Area",
-                            subtitle: isNote ? "Text on the canvas" : "Outlines a zone, VLAN or site") {
-                Image(systemName: isNote ? "note.text" : "rectangle.dashed")
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundStyle(Theme.Palette.textSecondary)
+            InspectorHeader(title: name,
+                            subtitle: isNote ? "Text on the canvas" : "Outlines a zone; devices inside move with it") {
+                if isNote {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 24, weight: .light))
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                } else {
+                    AnnotationOutline(kind: style.shape)
+                        .fill(style.fillColor)
+                        .overlay(AnnotationOutline(kind: style.shape)
+                            .stroke(style.strokeColor, style: StrokeStyle(lineWidth: 1.5, dash: style.line.dash(lineWidth: 1.5))))
+                        .frame(width: 34, height: 30)
+                }
             } trailing: { EmptyView() }
             PanelDivider(axis: .horizontal)
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     InspectorSection(isNote ? "Text" : "Label") {
-                        TextField(isNote ? "Note" : "Area name", text: $draft, axis: .vertical)
+                        TextField(isNote ? "Note" : "Name", text: $draft, axis: .vertical)
                             .lineLimit(isNote ? 3...10 : 1...2)
                             .textFieldStyle(.roundedBorder)
                             .font(Theme.Font.body)
@@ -685,11 +751,69 @@ private struct AnnotationInspector: View {
                             .onSubmit(commit)
                             .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
                     }
+                    InspectorSection("Style") {
+                        if isNote {
+                            StyleRow("Colour") {
+                                SwatchPicker(selection: style.fill) { color in
+                                    var new = style
+                                    new.fill = color
+                                    setStyle(new, "Change Colour")
+                                }
+                            }
+                        } else {
+                            StyleRow("Shape") {
+                                ShapeKindPicker(selection: style.shape) { shape in
+                                    var new = style
+                                    new.shape = shape
+                                    setStyle(new, "Change Shape")
+                                }
+                            }
+                            StyleRow("Border") {
+                                SwatchPicker(selection: style.stroke) { color in
+                                    var new = style
+                                    new.stroke = color
+                                    setStyle(new, "Change Border Colour")
+                                }
+                                LinePatternPicker(selection: style.line) { line in
+                                    var new = style
+                                    new.line = line
+                                    setStyle(new, "Change Border Style")
+                                }
+                            }
+                            StyleRow("Fill") {
+                                SwatchPicker(selection: style.fill) { color in
+                                    var new = style
+                                    new.fill = color
+                                    // A colour at the faint default opacity is hard to see.
+                                    if color != nil && new.fillOpacity < 0.12 { new.fillOpacity = 0.15 }
+                                    setStyle(new, "Change Fill")
+                                }
+                                FillOpacitySlider(value: style.fillOpacity) { opacity in
+                                    var new = style
+                                    new.fillOpacity = opacity
+                                    setStyle(new, "Change Fill Opacity")
+                                }
+                            }
+                        }
+                    }
+                    InspectorSection("Arrange") {
+                        StackButtons { move in document.reorderAnnotation(annotation.id, move, undoManager: undoManager) }
+                        Toggle("Locked", isOn: Binding(
+                            get: { annotation.locked },
+                            set: { document.setAnnotationsLocked([annotation.id], $0, undoManager: undoManager) }
+                        ))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        if annotation.group != nil {
+                            Button("Ungroup", systemImage: "rectangle.3.group") { workspace.arrangeRequest = .ungroup }
+                                .controlSize(.small)
+                        }
+                    }
                     InspectorSection("Frame") {
                         KeyValueRow("Position", "\(Int(annotation.x)), \(Int(annotation.y))", mono: true)
                         KeyValueRow("Size", "\(Int(annotation.width)) × \(Int(annotation.height))", mono: true)
                     }
-                    Button(isNote ? "Delete Note" : "Delete Area", systemImage: "trash", role: .destructive) {
+                    Button("Delete \(name)", systemImage: "trash", role: .destructive) {
                         document.removeAnnotation(annotation.id, undoManager: undoManager)
                     }
                     .controlSize(.small)
@@ -702,13 +826,39 @@ private struct AnnotationInspector: View {
         .onChange(of: annotation.text) { _, text in draft = text }
     }
 
+    private func setStyle(_ new: ShapeStyle, _ actionName: String) {
+        document.setAnnotationStyle(annotation.id, to: new, actionName: actionName, undoManager: undoManager)
+    }
+
     private func commit() {
         document.updateAnnotation(annotation.id, rect: annotation.rect, text: draft,
-                                  actionName: annotation.kind == .note ? "Edit Note" : "Edit Area", undoManager: undoManager)
+                                  actionName: "Edit \(name)", undoManager: undoManager)
     }
 }
 
-// MARK: - Multiple devices
+/// Fill opacity, committed when the drag ends so one drag is one undo step.
+private struct FillOpacitySlider: View {
+    let value: Double
+    let onCommit: (Double) -> Void
+    @State private var draft: Double?
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.s) {
+            Slider(value: Binding(get: { draft ?? value }, set: { draft = $0 }), in: 0...1) { editing in
+                if !editing, let draft {
+                    onCommit((draft * 100).rounded() / 100)
+                    self.draft = nil
+                }
+            }
+            .controlSize(.small)
+            Text("\(Int(((draft ?? value) * 100).rounded())) %")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textSecondary)
+                .monospacedDigit()
+                .frame(width: 38, alignment: .trailing)
+        }
+    }
+}
 
 private struct SelectionInspector: View {
     @ObservedObject var document: ProjectDocument
@@ -747,8 +897,13 @@ private struct SelectionInspector: View {
 
     var body: some View {
         let devices = document.state.devices.filter { workspace.selection.contains($0.id) }
+        let annotations = document.state.annotations.filter { workspace.selectedAnnotations.contains($0.id) }
+        let total = devices.count + annotations.count
+        let groups = Set(devices.compactMap(\.group) + annotations.compactMap(\.group))
         VStack(spacing: 0) {
-            InspectorHeader(title: "\(devices.count) devices", subtitle: "Multiple selection") {
+            InspectorHeader(title: annotations.isEmpty ? "\(devices.count) devices" : "\(total) items",
+                            subtitle: groups.count == 1 && devices.allSatisfy({ $0.group != nil })
+                                && annotations.allSatisfy({ $0.group != nil }) ? "Group" : "Multiple selection") {
                 Image(systemName: "square.on.square.dashed")
                     .font(.system(size: 24, weight: .light))
                     .foregroundStyle(Theme.Palette.textSecondary)
@@ -756,6 +911,35 @@ private struct SelectionInspector: View {
             PanelDivider(axis: .horizontal)
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                    InspectorSection("Group") {
+                        HStack {
+                            Button("Group", systemImage: "rectangle.3.group") { workspace.arrangeRequest = .group }
+                            Button("Ungroup") { workspace.arrangeRequest = .ungroup }
+                                .disabled(groups.isEmpty)
+                        }
+                        .controlSize(.small)
+                        Text("Grouped items select and move together.")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textTertiary)
+                    }
+                    if !devices.isEmpty {
+                        InspectorSection("Device colour") {
+                            SwatchPicker(selection: Set(devices.map(\.color)).count == 1 ? devices[0].color : nil) { color in
+                                document.setDeviceColor(Set(devices.map(\.id)), to: color, undoManager: undoManager)
+                            }
+                        }
+                    }
+                    if !annotations.isEmpty {
+                        InspectorSection("Shapes and notes") {
+                            StackButtons { move in workspace.arrangeRequest = .stack(move) }
+                            HStack {
+                                Button("Lock", systemImage: "lock") { workspace.arrangeRequest = .lock }
+                                Button("Unlock", systemImage: "lock.open") { workspace.arrangeRequest = .unlock }
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                    if devices.count > 1 {
                     InspectorSection("Arrange") {
                         LazyVGrid(columns: Array(repeating: GridItem(.fixed(30), spacing: Theme.Spacing.xs), count: 6),
                                   alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -767,6 +951,8 @@ private struct SelectionInspector: View {
                             }
                         }
                     }
+                    }
+                    if !devices.isEmpty {
                     InspectorSection("Kinds") {
                         ForEach(DeviceKind.allCases.filter { kind in devices.contains { $0.kind == kind } }) { kind in
                             KeyValueRow(kind.displayName, "\(devices.filter { $0.kind == kind }.count)")
@@ -778,6 +964,7 @@ private struct SelectionInspector: View {
                             Button("Stop", systemImage: "stop.fill") { workspace.setPower(.stopped, for: devices.map(\.id)) }
                         }
                         .controlSize(.small)
+                    }
                     }
                 }
                 .padding(Theme.Spacing.l)

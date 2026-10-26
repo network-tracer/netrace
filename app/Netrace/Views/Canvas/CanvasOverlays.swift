@@ -24,7 +24,11 @@ struct CanvasOverlays: View {
                 .allowsHitTesting(false)
             }
 
-            VStack {
+            VStack(spacing: 0) {
+                if workspace.tool == .rectangle {
+                    ShapeToolOptions(workspace: workspace)
+                        .padding(.top, Theme.Spacing.m)
+                }
                 if let hint = workspace.hint ?? toolHint {
                     Text(hint)
                         .font(Theme.Font.caption)
@@ -40,7 +44,10 @@ struct CanvasOverlays: View {
                 }
                 Spacer()
                 HStack(alignment: .bottom) {
-                    ZoomControl(workspace: workspace, onZoomToFit: onZoomToFit)
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        if workspace.showsLayer2 { Layer2Legend() }
+                        ZoomControl(workspace: workspace, onZoomToFit: onZoomToFit)
+                    }
                     Spacer()
                     if workspace.mode == .simulation {
                         SimulationTimeline(document: document, workspace: workspace)
@@ -67,7 +74,92 @@ struct CanvasOverlays: View {
         return switch workspace.tool {
         case .cable: "\(workspace.cableKind.title) cable: drag from one device to another, or click both. Esc to finish."
         case .hand: "Drag to pan. Pinch to zoom."
+        case .rectangle: "Drag to draw. Devices inside a shape move with it."
         default: nil
+        }
+    }
+}
+
+/// Key to the VLAN / spanning-tree overlay, shown once VLANs, trunks or
+/// blocked ports are on the canvas.
+private struct Layer2Legend: View {
+    @EnvironmentObject private var simulation: SimulationController
+
+    var body: some View {
+        if let overlay = simulation.layer2,
+           !overlay.vlans.isEmpty || overlay.ports.contains(where: { $0.trunk || $0.blocked }) {
+            FloatingPanel {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(overlay.vlans, id: \.self) { vlan in
+                        legendRow(color: LinksLayer.vlanColor(vlan), text: "VLAN \(vlan)")
+                    }
+                    if overlay.ports.contains(where: \.trunk) {
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Capsule().fill(Theme.Palette.link).frame(width: 16, height: 4)
+                                .overlay(Capsule().fill(Theme.Palette.canvas).frame(width: 10, height: 1))
+                            Text("Trunk").font(Theme.Font.caption)
+                        }
+                    }
+                    if overlay.ports.contains(where: \.blocked) {
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Capsule().fill(Theme.Palette.statusWarning).frame(width: 3, height: 12).frame(width: 16)
+                            Text("Blocked by STP").font(Theme.Font.caption)
+                        }
+                    }
+                    if !overlay.roots.isEmpty {
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Image(systemName: "crown.fill").font(.system(size: 9)).foregroundStyle(Theme.Palette.statusWarning)
+                                .frame(width: 16)
+                            Text("Root bridge").font(Theme.Font.caption)
+                        }
+                    }
+                }
+                .foregroundStyle(Theme.Palette.textSecondary)
+                .padding(.horizontal, Theme.Spacing.s)
+                .padding(.vertical, Theme.Spacing.xs)
+            }
+            .help("VLANs and spanning tree (⌥⌘V to hide)")
+        }
+    }
+
+    private func legendRow(color: Color, text: String) -> some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Capsule().fill(color).frame(width: 16, height: 3)
+            Text(text).font(Theme.Font.caption)
+        }
+    }
+}
+
+/// Shape tool: which shape to draw (and how many sides for a polygon).
+private struct ShapeToolOptions: View {
+    @ObservedObject var workspace: WorkspaceModel
+
+    var body: some View {
+        FloatingPanel {
+            HStack(spacing: Theme.Spacing.xs) {
+                ForEach(ShapeKind.choices, id: \.self) { kind in
+                    IconButton(glyph: .system(kind.isPolygon ? "hexagon" : kind.symbol),
+                               help: kind.isPolygon ? "Polygon" : kind.title, size: 14,
+                               isOn: kind.isSameKind(as: workspace.shapeKind)) {
+                        if !kind.isSameKind(as: workspace.shapeKind) { workspace.shapeKind = kind }
+                    }
+                }
+                if case .polygon(let sides) = workspace.shapeKind {
+                    PanelDivider(axis: .vertical).frame(height: 18).padding(.horizontal, Theme.Spacing.xs)
+                    Text("\(sides) sides")
+                        .font(Theme.Font.captionMedium)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .frame(minWidth: 52)
+                    Stepper("Sides", value: Binding(
+                        get: { Int(sides) },
+                        set: { workspace.shapeKind = .polygon(sides: UInt8($0)) }
+                    ), in: Int(ShapeKind.sidesRange.lowerBound)...Int(ShapeKind.sidesRange.upperBound))
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.xs)
         }
     }
 }
@@ -276,11 +368,24 @@ struct DeviceContextMenu: View {
             workspace.inspectorTab = .config
             workspace.showsInspector = true
         }
+        if device.kind.hasCli {
+            Button("Copy Configuration To…", systemImage: "doc.on.doc") {
+                workspace.copyConfigSource = device.id
+            }
+            .disabled(!document.state.devices.contains { $0.kind == device.kind && $0.id != device.id })
+        }
         if let link = document.links(attachedTo: device.id).first {
             Button("Capture on \(link.endpoint(for: device.id)?.port.abbreviatedInterface ?? "Cable")", image: ImageResource(name: Icon.capture.rawValue, bundle: .main)) {
                 workspace.startCapture(on: link.id)
             }
         }
+        Divider()
+        Menu("Colour", systemImage: "paintpalette") {
+            SwatchMenuItems(selection: device.color) { color in
+                document.setDeviceColor(Set(targets), to: color, undoManager: undoManager)
+            }
+        }
+        GroupMenuItems(workspace: workspace, isGrouped: device.group != nil)
         Divider()
         Button("Duplicate", systemImage: "plus.square.on.square") {
             workspace.selectDevices(Set(targets))
@@ -308,6 +413,19 @@ struct LinkContextMenu: View {
             workspace.showsInspector = true
         }
         Divider()
+        Menu("Colour", systemImage: "paintpalette") {
+            SwatchMenuItems(selection: link.color) { color in
+                document.setLinkStyle(link.id, to: LinkStyle(color: color, line: link.line), undoManager: undoManager)
+            }
+        }
+        Picker("Line", selection: Binding(
+            get: { link.displayedLine },
+            set: { document.setLinkStyle(link.id, to: LinkStyle(color: link.color, line: $0 == .solid ? nil : $0),
+                                         undoManager: undoManager) }
+        )) {
+            ForEach(LinePattern.allCases) { Text($0.title).tag($0) }
+        }
+        Divider()
         Button("Delete Cable", systemImage: "trash", role: .destructive) {
             document.disconnect(link.id, undoManager: undoManager)
         }
@@ -332,5 +450,136 @@ struct CanvasContextMenu: View {
         Toggle("Show Minimap", isOn: $workspace.showsMinimap)
         Divider()
         Button("Zoom to Fit", systemImage: "arrow.up.left.and.arrow.down.right", action: onZoomToFit)
+    }
+}
+
+/// Right-click menu of a note or shape. Acts on the whole selection when
+/// the item is part of it.
+struct AnnotationContextMenu: View {
+    let annotation: AnnotationInfo
+    @ObservedObject var document: ProjectDocument
+    @ObservedObject var workspace: WorkspaceModel
+    @Environment(\.undoManager) private var undoManager
+
+    var body: some View {
+        let isNote = annotation.kind == .note
+        Button(isNote ? "Edit Text" : "Edit Label", systemImage: "pencil") {
+            workspace.selectAnnotation(annotation.id)
+            workspace.editingAnnotation = annotation.id
+        }
+        Divider()
+        Menu(isNote ? "Colour" : "Fill", systemImage: "paintpalette") {
+            SwatchMenuItems(selection: annotation.style.fill) { color in
+                var style = annotation.style
+                style.fill = color
+                if !isNote, color != nil, style.fillOpacity < 0.12 { style.fillOpacity = 0.15 }
+                document.setAnnotationStyle(annotation.id, to: style, actionName: "Change Colour", undoManager: undoManager)
+            }
+        }
+        if !isNote {
+            Menu("Border", systemImage: "square.dashed") {
+                SwatchMenuItems(selection: annotation.style.stroke) { color in
+                    var style = annotation.style
+                    style.stroke = color
+                    document.setAnnotationStyle(annotation.id, to: style, actionName: "Change Border Colour",
+                                                undoManager: undoManager)
+                }
+                Divider()
+                Picker("Line", selection: Binding(
+                    get: { annotation.style.line },
+                    set: { line in
+                        var style = annotation.style
+                        style.line = line
+                        document.setAnnotationStyle(annotation.id, to: style, actionName: "Change Border Style",
+                                                    undoManager: undoManager)
+                    }
+                )) {
+                    ForEach(LinePattern.allCases) { Text($0.title).tag($0) }
+                }
+            }
+            Menu("Shape", systemImage: "square.on.circle") {
+                ForEach([ShapeKind.roundedRectangle, .rectangle, .ellipse] + (3...8).map { ShapeKind.polygon(sides: UInt8($0)) },
+                        id: \.self) { kind in
+                    Toggle(kind.title, isOn: Binding(
+                        get: { annotation.style.shape == kind },
+                        set: { _ in
+                            var style = annotation.style
+                            style.shape = kind
+                            document.setAnnotationStyle(annotation.id, to: style, actionName: "Change Shape",
+                                                        undoManager: undoManager)
+                        }
+                    ))
+                }
+            }
+        }
+        Divider()
+        Menu("Arrange", systemImage: "square.3.layers.3d") {
+            ForEach([ProjectDocument.StackMove.front, .forward, .backward, .back], id: \.self) { move in
+                Button(move.title) {
+                    selectIfNeeded()
+                    workspace.arrangeRequest = .stack(move)
+                }
+            }
+        }
+        Button(annotation.locked ? "Unlock" : "Lock", systemImage: annotation.locked ? "lock.open" : "lock") {
+            selectIfNeeded()
+            workspace.arrangeRequest = annotation.locked ? .unlock : .lock
+        }
+        GroupMenuItems(workspace: workspace, isGrouped: annotation.group != nil)
+        Divider()
+        Button("Delete", systemImage: "trash", role: .destructive) {
+            document.removeAnnotation(annotation.id, undoManager: undoManager)
+        }
+    }
+
+    private func selectIfNeeded() {
+        if !workspace.selectedAnnotations.contains(annotation.id) { workspace.selectAnnotation(annotation.id) }
+    }
+}
+
+/// Palette entries for a context menu; the first is the default colour.
+struct SwatchMenuItems: View {
+    let selection: Swatch?
+    let onPick: (Swatch?) -> Void
+
+    var body: some View {
+        Toggle("Default", isOn: Binding(get: { selection == nil }, set: { _ in onPick(nil) }))
+        Divider()
+        ForEach(Swatch.allCases) { swatch in
+            Toggle(isOn: Binding(get: { selection == swatch }, set: { _ in onPick(swatch) })) {
+                Label {
+                    Text(swatch.title)
+                } icon: {
+                    Image(nsImage: swatch.menuImage)
+                }
+            }
+        }
+    }
+}
+
+/// Group / Ungroup entries for the current selection.
+struct GroupMenuItems: View {
+    @ObservedObject var workspace: WorkspaceModel
+    let isGrouped: Bool
+
+    var body: some View {
+        if workspace.selection.count + workspace.selectedAnnotations.count > 1 {
+            Button("Group", systemImage: "rectangle.3.group") { workspace.arrangeRequest = .group }
+        }
+        if isGrouped {
+            Button("Ungroup", systemImage: "rectangle.3.group.fill") { workspace.arrangeRequest = .ungroup }
+        }
+    }
+}
+
+extension Swatch {
+    /// A colour dot for menus, which can't tint SwiftUI shapes.
+    var menuImage: NSImage {
+        let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            NSColor(color).setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        return image
     }
 }

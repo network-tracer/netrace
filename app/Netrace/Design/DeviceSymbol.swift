@@ -250,6 +250,8 @@ struct DeviceSymbolView: View {
     var scale: CGFloat = 1
     var isSelected = false
     var isDimmed = false
+    /// The user's colour for this device; `nil` is the default ink.
+    var tint: Swatch?
 
     var body: some View {
         let size = DeviceSymbol.size(for: kind)
@@ -257,7 +259,7 @@ struct DeviceSymbolView: View {
         // Solid style, like SF Symbols' filled variants: the silhouette is
         // filled with the ink colour and interior detail is knocked out of it.
         ZStack {
-            DeviceOutlineShape(kind: kind).fill(Theme.Palette.symbolInk)
+            DeviceOutlineShape(kind: kind).fill(tint?.color ?? Theme.Palette.symbolInk)
             DeviceFaintShape(kind: kind).fill(Theme.Palette.symbolKnockout.opacity(0.22))
             DeviceDetailShape(kind: kind)
                 .stroke(Theme.Palette.symbolKnockout, style: StrokeStyle(lineWidth: line, lineCap: .round, lineJoin: .round))

@@ -20,8 +20,10 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+netrace-cli.workspace = true
 netrace-doc.workspace = true
 netrace-engine.workspace = true
 netrace-sim.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 uniffi.workspace = true

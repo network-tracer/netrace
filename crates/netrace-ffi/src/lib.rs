@@ -10,8 +10,12 @@ use netrace_doc as doc;
 
 uniffi::setup_scaffolding!();
 
+mod console;
 mod simulation;
+mod style;
+pub use console::*;
 pub use simulation::*;
+pub use style::*;
 
 /// Version of the Rust core, shown in the app's About panel and status bar.
 #[uniffi::export]
@@ -79,6 +83,8 @@ pub struct DeviceInfo {
     pub y: f64,
     /// IPv4 settings (end devices only).
     pub ip: Option<HostIpInfo>,
+    pub color: Option<Swatch>,
+    pub group: Option<u64>,
 }
 
 /// An end device's IPv4 settings. `mask` is derived from `prefix_len` and
@@ -175,6 +181,8 @@ pub struct LinkInfo {
     pub a: EndpointInfo,
     pub b: EndpointInfo,
     pub medium: Medium,
+    pub color: Option<Swatch>,
+    pub line: Option<LinePattern>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -192,6 +200,9 @@ pub struct AnnotationInfo {
     pub width: f64,
     pub height: f64,
     pub text: String,
+    pub style: ShapeStyle,
+    pub locked: bool,
+    pub group: Option<u64>,
 }
 
 /// Lets undo put a deleted annotation back in its stacking slot.
@@ -206,6 +217,9 @@ pub struct ProjectSnapshot {
     pub devices: Vec<DeviceInfo>,
     pub links: Vec<LinkInfo>,
     pub annotations: Vec<AnnotationInfo>,
+    /// Changes with anything the simulation depends on, including
+    /// configurations the snapshot doesn't carry.
+    pub simulation_key: u64,
 }
 
 /// Opaque-to-the-user record that lets undo put a deleted device back.
@@ -214,6 +228,8 @@ pub struct RemovedDeviceInfo {
     pub device: DeviceInfo,
     pub links: Vec<LinkInfo>,
     pub index: u64,
+    /// The device's configuration, opaque to Swift (see `device_settings`).
+    pub settings: String,
 }
 
 /// A live, mutable netrace project owned by one document window.
@@ -255,6 +271,7 @@ impl Project {
                 .iter()
                 .map(AnnotationInfo::from)
                 .collect(),
+            simulation_key: project.simulation_key(),
         }
     }
 
@@ -282,6 +299,35 @@ impl Project {
         Ok(previous.map(HostIpInfo::from))
     }
 
+    /// A device's name, IP settings and configuration as JSON: opaque to
+    /// Swift, handed back to `set_device_settings` for undo or copy/paste.
+    pub fn device_settings(&self, id: u64) -> Result<String, CoreError> {
+        let settings = self
+            .lock()
+            .device_settings(doc::DeviceId(id))
+            .map_err(invalid_operation)?;
+        Ok(serde_json::to_string(&settings).expect("settings always serialise"))
+    }
+
+    /// Restores settings from `device_settings`; returns the previous ones.
+    pub fn set_device_settings(&self, id: u64, settings: String) -> Result<String, CoreError> {
+        let settings: doc::DeviceSettings =
+            serde_json::from_str(&settings).map_err(|e| CoreError::InvalidOperation {
+                message: e.to_string(),
+            })?;
+        let previous = self
+            .lock()
+            .set_device_settings(doc::DeviceId(id), settings)
+            .map_err(invalid_operation)?;
+        Ok(serde_json::to_string(&previous).expect("settings always serialise"))
+    }
+
+    /// Changes when anything the simulation depends on changes; the app
+    /// rebuilds its simulation when it does.
+    pub fn simulation_key(&self) -> u64 {
+        self.lock().simulation_key()
+    }
+
     /// Renames a device; returns the previous name (for undo).
     pub fn rename_device(&self, id: u64, name: String) -> Result<String, CoreError> {
         self.lock()
@@ -294,16 +340,28 @@ impl Project {
             .lock()
             .remove_device(doc::DeviceId(id))
             .map_err(invalid_operation)?;
+        let settings = doc::DeviceSettings {
+            name: removed.device.name.clone(),
+            ip: removed.device.ip,
+            config: removed.device.config.clone(),
+            startup: removed.device.startup.clone(),
+        };
         Ok(RemovedDeviceInfo {
             device: DeviceInfo::from(&removed.device),
             links: removed.links.iter().map(LinkInfo::from).collect(),
             index: removed.index as u64,
+            settings: serde_json::to_string(&settings).expect("settings always serialise"),
         })
     }
 
     pub fn restore_device(&self, removed: RemovedDeviceInfo) -> Result<(), CoreError> {
+        let mut device: doc::Device = removed.device.into();
+        if let Ok(settings) = serde_json::from_str::<doc::DeviceSettings>(&removed.settings) {
+            device.config = settings.config;
+            device.startup = settings.startup;
+        }
         let removed = doc::RemovedDevice {
-            device: removed.device.into(),
+            device,
             links: removed.links.into_iter().map(Into::into).collect(),
             index: usize::try_from(removed.index).unwrap_or(usize::MAX),
         };
@@ -312,6 +370,8 @@ impl Project {
             .map_err(invalid_operation)
     }
 
+    // Flat parameters read naturally as Swift labels (x:y:width:height:…).
+    #[allow(clippy::too_many_arguments)]
     pub fn add_annotation(
         &self,
         kind: AnnotationKind,
@@ -320,9 +380,96 @@ impl Project {
         width: f64,
         height: f64,
         text: String,
+        style: ShapeStyle,
     ) -> AnnotationInfo {
         let rect = doc::Rect::new(x, y, width, height);
-        AnnotationInfo::from(self.lock().add_annotation(kind.into(), rect, &text))
+        AnnotationInfo::from(
+            self.lock()
+                .add_annotation(kind.into(), rect, &text, style.into()),
+        )
+    }
+
+    /// Replaces an annotation's look; returns the previous one (for undo).
+    pub fn set_annotation_style(
+        &self,
+        id: u64,
+        style: ShapeStyle,
+    ) -> Result<ShapeStyle, CoreError> {
+        self.lock()
+            .set_annotation_style(doc::AnnotationId(id), style.into())
+            .map(Into::into)
+            .map_err(invalid_operation)
+    }
+
+    /// Locks or unlocks an annotation; returns the previous state.
+    pub fn set_annotation_locked(&self, id: u64, locked: bool) -> Result<bool, CoreError> {
+        self.lock()
+            .set_annotation_locked(doc::AnnotationId(id), locked)
+            .map_err(invalid_operation)
+    }
+
+    /// Moves an annotation in the stacking order (0 = back); returns its previous index.
+    pub fn reorder_annotation(&self, id: u64, index: u64) -> Result<u64, CoreError> {
+        let index = usize::try_from(index).unwrap_or(usize::MAX);
+        self.lock()
+            .reorder_annotation(doc::AnnotationId(id), index)
+            .map(|i| i as u64)
+            .map_err(invalid_operation)
+    }
+
+    /// Tints a device symbol; returns the previous colour.
+    pub fn set_device_color(
+        &self,
+        id: u64,
+        color: Option<Swatch>,
+    ) -> Result<Option<Swatch>, CoreError> {
+        self.lock()
+            .set_device_color(doc::DeviceId(id), color.map(Into::into))
+            .map(|c| c.map(Into::into))
+            .map_err(invalid_operation)
+    }
+
+    /// Sets a cable's colour and line pattern; returns the previous ones.
+    pub fn set_link_style(&self, id: u64, style: LinkStyle) -> Result<LinkStyle, CoreError> {
+        let (color, line) = self
+            .lock()
+            .set_link_style(
+                doc::LinkId(id),
+                style.color.map(Into::into),
+                style.line.map(Into::into),
+            )
+            .map_err(invalid_operation)?;
+        Ok(LinkStyle {
+            color: color.map(Into::into),
+            line: line.map(Into::into),
+        })
+    }
+
+    /// A fresh group id for `set_groups`.
+    pub fn new_group_id(&self) -> u64 {
+        self.lock().new_group_id().0
+    }
+
+    /// Assigns items to groups, all or nothing; returns the previous memberships.
+    pub fn set_groups(
+        &self,
+        changes: Vec<GroupMembership>,
+    ) -> Result<Vec<GroupMembership>, CoreError> {
+        let changes: Vec<_> = changes
+            .into_iter()
+            .map(|m| (m.item.into(), m.group.map(doc::GroupId)))
+            .collect();
+        let previous = self
+            .lock()
+            .set_groups(&changes)
+            .map_err(invalid_operation)?;
+        Ok(previous
+            .into_iter()
+            .map(|(item, group)| GroupMembership {
+                item: item.into(),
+                group: group.map(|g| g.0),
+            })
+            .collect())
     }
 
     /// Replaces an annotation's frame and text; returns the previous version (for undo).
@@ -365,6 +512,9 @@ impl Project {
                 kind: a.kind.into(),
                 rect: doc::Rect::new(a.x, a.y, a.width, a.height),
                 text: a.text,
+                style: doc::ShapeStyle::from(a.style).sanitised(),
+                locked: a.locked,
+                group: a.group.map(doc::GroupId),
             },
             index: usize::try_from(removed.index).unwrap_or(usize::MAX),
         };
@@ -497,6 +647,9 @@ impl From<&doc::Annotation> for AnnotationInfo {
             width: a.rect.width,
             height: a.rect.height,
             text: a.text.clone(),
+            style: a.style.into(),
+            locked: a.locked,
+            group: a.group.map(|g| g.0),
         }
     }
 }
@@ -510,6 +663,8 @@ impl From<&doc::Device> for DeviceInfo {
             x: d.position.x,
             y: d.position.y,
             ip: d.ip.map(HostIpInfo::from),
+            color: d.color.map(Into::into),
+            group: d.group.map(|g| g.0),
         }
     }
 }
@@ -522,6 +677,10 @@ impl From<DeviceInfo> for doc::Device {
             name: d.name,
             position: doc::Point::new(d.x, d.y),
             ip: d.ip.as_ref().and_then(|ip| doc::HostIp::try_from(ip).ok()),
+            color: d.color.map(Into::into),
+            group: d.group.map(doc::GroupId),
+            config: doc::DeviceConfig::default(),
+            startup: None,
         }
     }
 }
@@ -551,6 +710,8 @@ impl From<&doc::Link> for LinkInfo {
             a: (&l.a).into(),
             b: (&l.b).into(),
             medium: l.medium.into(),
+            color: l.color.map(Into::into),
+            line: l.line.map(Into::into),
         }
     }
 }
@@ -562,6 +723,8 @@ impl From<LinkInfo> for doc::Link {
             a: l.a.into(),
             b: l.b.into(),
             medium: l.medium.into(),
+            color: l.color.map(Into::into),
+            line: l.line.map(Into::into),
         }
     }
 }
@@ -629,8 +792,15 @@ mod tests {
     #[test]
     fn annotation_lifecycle_through_the_bridge() {
         let project = Project::new();
-        let note =
-            project.add_annotation(AnnotationKind::Note, 10.0, 10.0, 160.0, 64.0, "Core".into());
+        let note = project.add_annotation(
+            AnnotationKind::Note,
+            10.0,
+            10.0,
+            160.0,
+            64.0,
+            "Core".into(),
+            default_shape_style(),
+        );
         let previous = project
             .update_annotation(note.id, 20.0, 20.0, 200.0, 80.0, "Core layer".into())
             .unwrap();
@@ -641,6 +811,47 @@ mod tests {
         assert_eq!(project.snapshot().annotations[0].text, "Core layer");
         let reopened = Project::from_json(project.to_json()).unwrap();
         assert_eq!(reopened.snapshot(), project.snapshot());
+    }
+
+    #[test]
+    fn styling_through_the_bridge() {
+        let project = Project::new();
+        let r1 = project.add_device(DeviceKind::Router, 0.0, 0.0);
+        let hex = ShapeStyle {
+            shape: ShapeKind::Polygon { sides: 6 },
+            fill: Some(Swatch::Teal),
+            ..default_shape_style()
+        };
+        let area =
+            project.add_annotation(AnnotationKind::Area, 0.0, 0.0, 200.0, 200.0, "".into(), hex);
+        assert_eq!(area.style, hex);
+        assert_eq!(
+            project.set_device_color(r1.id, Some(Swatch::Red)).unwrap(),
+            None
+        );
+        let group = project.new_group_id();
+        let previous = project
+            .set_groups(vec![
+                GroupMembership {
+                    item: CanvasItem::Device { id: r1.id },
+                    group: Some(group),
+                },
+                GroupMembership {
+                    item: CanvasItem::Annotation { id: area.id },
+                    group: Some(group),
+                },
+            ])
+            .unwrap();
+        assert!(previous.iter().all(|m| m.group.is_none()));
+        assert!(project.set_annotation_locked(area.id, true).is_ok());
+
+        // Delete and restore keeps style, lock and group.
+        let before = project.snapshot();
+        let removed = project.remove_annotation(area.id).unwrap();
+        project.restore_annotation(removed).unwrap();
+        assert_eq!(project.snapshot(), before);
+        let reopened = Project::from_json(project.to_json()).unwrap();
+        assert_eq!(reopened.snapshot(), before);
     }
 
     #[test]

@@ -129,6 +129,30 @@ impl Simulation {
             })
     }
 
+    /// Schedules a traceroute from a device at `at_ns`; returns the session id.
+    pub fn traceroute(
+        &self,
+        source: u64,
+        destination: String,
+        at_ns: u64,
+    ) -> Result<u64, CoreError> {
+        let destination = destination
+            .trim()
+            .parse()
+            .map_err(|_| CoreError::InvalidOperation {
+                message: format!("\"{}\" is not a valid IPv4 address.", destination.trim()),
+            })?;
+        self.lock()
+            .traceroute(
+                doc::DeviceId(source),
+                destination,
+                SimTime::from_nanos(at_ns),
+            )
+            .map_err(|e| CoreError::InvalidOperation {
+                message: e.to_string(),
+            })
+    }
+
     /// Runs a command typed at an end device's prompt; returns the output.
     pub fn host_command(&self, device: u64, line: String, at_ns: u64) -> String {
         self.lock()
@@ -156,7 +180,7 @@ impl Simulation {
                 received: s.replies.len() as u16,
                 failed: s.failures.len() as u16,
                 finished: s.is_finished(),
-                report: network.ping_report(s.id).unwrap_or_default(),
+                report: network.session_report(s.id).unwrap_or_default(),
             })
             .collect()
     }
@@ -178,7 +202,7 @@ impl Simulation {
 }
 
 impl Simulation {
-    fn lock(&self) -> MutexGuard<'_, engine::Network> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, engine::Network> {
         self.inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -316,5 +340,86 @@ mod tests {
         assert!(parse_host_ip("192.168.1.300".into(), "24".into(), "".into()).is_err());
         assert!(parse_host_ip("192.168.1.10".into(), "255.0.255.0".into(), "".into()).is_err());
         assert!(parse_host_ip("192.168.1.10".into(), "24".into(), "10.0.0.1".into()).is_err());
+    }
+}
+
+/// How one switch port looks in the VLAN / spanning-tree overlay.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PortOverlay {
+    pub device_id: u64,
+    pub port: String,
+    /// Access VLAN (none for trunks and routed ports).
+    pub vlan: Option<u16>,
+    pub trunk: bool,
+    /// Spanning tree blocks it for at least one VLAN it carries.
+    pub blocked: bool,
+    pub err_disabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RootBridge {
+    pub vlan: u16,
+    pub device_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Layer2Overlay {
+    pub ports: Vec<PortOverlay>,
+    pub roots: Vec<RootBridge>,
+    /// VLANs in use anywhere (beyond VLAN 1), for the legend.
+    pub vlans: Vec<u16>,
+}
+
+#[uniffi::export]
+impl Simulation {
+    /// VLAN membership, trunks, blocked and err-disabled ports, root bridges.
+    pub fn layer2_overlay(&self) -> Layer2Overlay {
+        let network = self.lock();
+        let project = network.project();
+        let l2 = network.layer2();
+        let mut ports = Vec::new();
+        let mut vlans = std::collections::BTreeSet::new();
+        for d in project.devices().iter().filter(|d| d.kind.is_switch()) {
+            vlans.extend(d.config.vlans.keys().copied());
+            let disabled = network.err_disabled_ports(d.id);
+            for port in d.kind.port_names() {
+                let sp = d.config.interface(d.kind, &port).switchport;
+                if sp.routed {
+                    continue;
+                }
+                let blocked = l2.trees.values().any(|t| {
+                    t.ports
+                        .get(&(d.id, port.clone()))
+                        .is_some_and(|p| !p.role.forwards())
+                });
+                let err_disabled = disabled.contains(&port);
+                let interesting = sp.is_trunk() || sp.access_vlan != 1 || blocked || err_disabled;
+                if interesting {
+                    ports.push(PortOverlay {
+                        device_id: d.id.0,
+                        port,
+                        vlan: (!sp.is_trunk()).then_some(sp.access_vlan),
+                        trunk: sp.is_trunk(),
+                        blocked,
+                        err_disabled,
+                    });
+                }
+            }
+        }
+        // Only worth a crown where there's a choice of root (two or more bridges).
+        let roots = l2
+            .trees
+            .values()
+            .filter(|t| t.bridges.len() > 1)
+            .map(|t| RootBridge {
+                vlan: t.vlan,
+                device_id: t.root_device.0,
+            })
+            .collect();
+        Layer2Overlay {
+            ports,
+            roots,
+            vlans: vlans.into_iter().collect(),
+        }
     }
 }
