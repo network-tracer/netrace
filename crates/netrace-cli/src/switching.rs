@@ -597,10 +597,18 @@ fn spanning_tree(device: &Device, l2: &Layer2, only: Option<u16>) -> String {
         let _ = writeln!(
             out,
             "  Root ID    Priority    {}\n             Address     {}",
-            tree.root.priority,
-            cisco_mac(tree.root.mac)
+            tree.bridges
+                .get(&tree.root_of(device.id))
+                .map(|b| b.id.priority)
+                .unwrap_or(tree.root.priority),
+            cisco_mac(
+                tree.bridges
+                    .get(&tree.root_of(device.id))
+                    .map(|b| b.id.mac)
+                    .unwrap_or(tree.root.mac)
+            )
         );
-        if tree.root_device == device.id {
+        if tree.root_of(device.id) == device.id {
             out += "             This bridge is the root\n";
         } else if let Some(port) = &me.root_port {
             let number = tree

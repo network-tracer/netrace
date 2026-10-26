@@ -373,6 +373,8 @@ impl Ospf {
         let (ports, l2) = crate::stp::analyse(project);
         let before = Ospf::compute(project, &ports, &l2);
         let mut failed = project.clone();
+        // A replay, not an edit: the lab's locks don't apply.
+        failed.set_lab(None);
         let _ = failed.disconnect(link);
         let (ports, l2) = crate::stp::analyse(&failed);
         let after = Ospf::compute(&failed, &ports, &l2);

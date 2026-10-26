@@ -2502,3 +2502,156 @@ fn bpdus_explain_port_roles() {
     );
     assert!(bpdus.iter().any(|e| e.summary.contains("blocks")));
 }
+
+/// A 100-device campus: 6 OSPF routers in a ring, each with a switch pair
+/// (trunked, redundant so spanning tree blocks one link) and 7 PCs per switch.
+fn campus() -> (Project, Vec<DeviceId>) {
+    let mut p = Project::new();
+    let mut pcs = Vec::new();
+    let routers: Vec<DeviceId> = (0..6)
+        .map(|_| p.add_device(DeviceKind::Router, Point::default()).id)
+        .collect();
+    for i in 0..6usize {
+        let (a, b) = (routers[i], routers[(i + 1) % 6]);
+        p.connect(
+            end(a, "GigabitEthernet0/1"),
+            end(b, "GigabitEthernet0/2"),
+            Medium::Copper,
+        )
+        .unwrap();
+        router_port(&mut p, a, "GigabitEthernet0/1", &format!("10.0.{i}.1"), 30);
+        router_port(&mut p, b, "GigabitEthernet0/2", &format!("10.0.{i}.2"), 30);
+    }
+    for (i, r) in routers.iter().enumerate() {
+        let n = i + 1;
+        router_port(
+            &mut p,
+            *r,
+            "GigabitEthernet0/0",
+            &format!("192.168.{n}.1"),
+            24,
+        );
+        let s1 = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+        let s2 = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+        p.connect(
+            end(*r, "GigabitEthernet0/0"),
+            end(s1, "GigabitEthernet0/1"),
+            Medium::Copper,
+        )
+        .unwrap();
+        p.connect(
+            end(s1, "GigabitEthernet0/2"),
+            end(s2, "GigabitEthernet0/1"),
+            Medium::Copper,
+        )
+        .unwrap();
+        p.connect(
+            end(s1, "FastEthernet0/24"),
+            end(s2, "FastEthernet0/24"),
+            Medium::Copper,
+        )
+        .unwrap();
+        for (k, sw) in [s1, s2].into_iter().enumerate() {
+            for j in 0..7usize {
+                let host_n = 10 + k * 10 + j;
+                let pc = host(
+                    &mut p,
+                    &format!("192.168.{n}.{host_n}"),
+                    &format!("192.168.{n}.1"),
+                );
+                p.connect(
+                    end(sw, &format!("FastEthernet0/{}", j + 1)),
+                    end(pc, "FastEthernet0"),
+                    Medium::Copper,
+                )
+                .unwrap();
+                pcs.push(pc);
+            }
+        }
+        ospf_on(&mut p, *r, &[]);
+    }
+    (p, pcs)
+}
+
+#[test]
+#[ignore = "benchmark: cargo test --release -p netrace-engine campus_timings -- --ignored --nocapture"]
+fn campus_timings() {
+    use std::time::Instant;
+    let (p, pcs) = campus();
+    assert_eq!(p.devices().len(), 102);
+    let t = Instant::now();
+    let (ports, l2) = crate::stp::analyse(&p);
+    eprintln!("  spanning tree: {:?}", t.elapsed());
+    let t = Instant::now();
+    let _ = crate::Ospf::compute(&p, &ports, &l2);
+    eprintln!("  OSPF: {:?}", t.elapsed());
+    let t = Instant::now();
+    let mut net = Network::new(p.clone());
+    eprintln!(
+        "Network::new (STP, OSPF, stacks, start-up packets): {:?}",
+        t.elapsed()
+    );
+    let t = Instant::now();
+    let far = ip("192.168.4.25");
+    let s = net.ping(pcs[0], far, 10, net.end_time()).unwrap();
+    eprintln!("ping across the campus (full replay): {:?}", t.elapsed());
+    let report = net.session_report(s).unwrap();
+    if !report.contains("Reply from") {
+        let start = net.session(s).unwrap().started;
+        for e in net.trace().iter().filter(|e| e.time >= start).take(30) {
+            eprintln!(
+                "EV {} {:?} {}",
+                net.project().device(e.device).unwrap().name,
+                e.outcome,
+                e.summary.chars().take(160).collect::<String>()
+            );
+        }
+    }
+    assert!(report.contains("Reply from"), "{report}");
+    let t = Instant::now();
+    let _ = crate::routing_table(&p, net.project().devices()[0].id);
+    eprintln!(
+        "routing_table (one router, recomputes OSPF): {:?}",
+        t.elapsed()
+    );
+    let t = Instant::now();
+    let _ = crate::Ospf::for_project(&p);
+    eprintln!("Ospf::for_project: {:?}", t.elapsed());
+    let t = Instant::now();
+    for d in p.devices() {
+        let _ = crate::interface_rows(&p, d.id);
+    }
+    eprintln!("interface_rows for all 102 devices: {:?}", t.elapsed());
+    eprintln!("trace events: {}", net.trace().len());
+}
+
+#[test]
+#[ignore = "profiling loop: rebuilds the campus repeatedly"]
+fn campus_profile_loop() {
+    let (p, _) = campus();
+    for _ in 0..40 {
+        let _ = Network::new(p.clone());
+    }
+}
+
+#[test]
+fn each_switched_island_elects_its_own_root() {
+    // Two switch pairs, each cabled twice, joined only through a router:
+    // both pairs need a root of their own, or the second pair loops.
+    let (p, pcs) = campus();
+    let net = Network::new(p.clone());
+    assert!(net.warnings().is_empty(), "{:?}", net.warnings());
+    let tree = &net.layer2().trees[&1];
+    assert_eq!(tree.island_roots().len(), 6, "one root per switch pair");
+    let blocked = tree.ports.values().filter(|p| !p.role.forwards()).count();
+    assert_eq!(blocked, 6, "one blocked port per redundant pair");
+    let mut net = net;
+    let s = net
+        .ping(pcs[0], ip("192.168.4.25"), 10, net.end_time())
+        .unwrap();
+    assert!(
+        net.session_report(s)
+            .unwrap()
+            .contains("Reply from 192.168.4.25")
+    );
+}

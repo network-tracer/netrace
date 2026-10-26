@@ -214,7 +214,7 @@ impl Network {
                 }
             )));
         }
-        let Some(sp) = switchport(&self.project, id, port) else {
+        let Some(sp) = self.switchport(id, port) else {
             return Ok(1);
         };
         let vlan = match (sp.is_trunk(), frame.vlan) {
@@ -343,7 +343,7 @@ impl Network {
             .filter(|port| {
                 let key = (id, port.clone());
                 !self.psec_disabled.contains(&key)
-                    && switchport(&self.project, id, port).is_some_and(|sp| sp.carries(vlan))
+                    && self.switchport(id, port).is_some_and(|sp| sp.carries(vlan))
                     && self.l2.forwards(id, port, vlan)
             })
             .collect()
@@ -352,7 +352,7 @@ impl Network {
     /// The tag a frame of `vlan` leaves `port` with: none on access ports
     /// and for a trunk's native VLAN.
     fn egress_tag(&self, id: DeviceId, port: &str, vlan: u16) -> Option<u16> {
-        switchport(&self.project, id, port)
+        self.switchport(id, port)
             .filter(|sp| sp.is_trunk() && sp.native_vlan != vlan)
             .map(|_| vlan)
     }
@@ -365,7 +365,7 @@ impl Network {
             .iter()
             .map(|p| match self.egress_tag(id, p, vlan) {
                 Some(t) => format!("{} (trunk, tagged {t})", abbreviate_port(p)),
-                None if switchport(&self.project, id, p).is_some_and(|sp| sp.is_trunk()) => {
+                None if self.switchport(id, p).is_some_and(|sp| sp.is_trunk()) => {
                     format!("{} (trunk, native)", abbreviate_port(p))
                 }
                 None => abbreviate_port(p),
@@ -381,13 +381,16 @@ impl Network {
     /// Whether a switch uses anything beyond VLAN 1, so explanations only
     /// mention VLANs once they matter.
     pub(crate) fn vlans_in_use(&self, id: DeviceId) -> bool {
-        self.project.device(id).is_some_and(|d| {
-            !d.config.vlans.is_empty()
-                || d.kind
-                    .port_names()
-                    .iter()
-                    .any(|p| d.config.interface(d.kind, p).switchport.is_trunk())
-        })
+        self.vlan_switches.contains(&id)
+    }
+
+    /// A switch port's settings, from the per-rebuild cache.
+    pub(crate) fn switchport(
+        &self,
+        id: DeviceId,
+        port: &str,
+    ) -> Option<&netrace_doc::SwitchportConfig> {
+        self.switchports.get(&(id, port.to_string()))
     }
 
     /// The MAC of the switch's `Vlan` interface for this VLAN, if it's up.

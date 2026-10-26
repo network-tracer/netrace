@@ -410,12 +410,12 @@ impl Checker<'_> {
                 let Some(tree) = l2.trees.get(vlan) else {
                     return Err(format!("There's no spanning tree for VLAN {vlan} yet."));
                 };
-                if tree.root_device == d {
+                if tree.root_of(d) == d {
                     return Ok(());
                 }
                 let root = self
                     .project
-                    .device(tree.root_device)
+                    .device(tree.root_of(d))
                     .map(|r| r.name.clone())
                     .unwrap_or_default();
                 Err(format!(

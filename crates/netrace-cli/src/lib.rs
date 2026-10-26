@@ -557,6 +557,10 @@ impl Session {
                 Ok(session) => network.session_report(session).unwrap_or_default(),
                 Err(e) => format!("% {e}"),
             },
+            "configure" if project.is_locked(self.device) => format!(
+                "% {} is locked by the lab: show commands work, but its configuration can't be changed.",
+                device.name
+            ),
             "configure" => {
                 self.mode = Mode::Config;
                 "Enter configuration commands, one per line.  End with CNTL/Z.".into()

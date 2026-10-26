@@ -1090,6 +1090,17 @@ private struct NodeView: View {
                         .help("Spanning-tree root bridge for VLAN \(rootVlans.map(String.init).joined(separator: ", "))")
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if device.locked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .padding(3)
+                        .background(Circle().fill(Theme.Palette.canvas))
+                        .offset(x: -9, y: -9)
+                        .help("Locked by the lab: you can look, but not change it")
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if power != .running {
                     StatusGlyph(state: power, size: 9)

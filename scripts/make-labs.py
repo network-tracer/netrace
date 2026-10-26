@@ -77,8 +77,12 @@ def task(title, checks, detail="", hint=None):
     return t
 
 
-def lab(title, topic, brief, tasks):
-    return {"title": title, "topic": topic, "brief": brief, "tasks": tasks}
+def lab(title, topic, brief, tasks, locked=None):
+    the_lab = {"title": title, "topic": topic, "brief": brief, "tasks": tasks}
+    if locked:
+        # Scenery the student can look at but not change.
+        the_lab["locked"] = locked
+    return the_lab
 
 
 # Checks
@@ -343,7 +347,7 @@ register("06-default-route", t, lab(
              detail="`ip route 0.0.0.0 0.0.0.0 203.0.113.1`",
              hint="0.0.0.0/0 matches every address, but only when nothing more specific does."),
         task("PC1 can reach WEB", [ping("PC1", "WEB")]),
-    ]), """
+    ], locked=["ISP", "WEB"]), """
 R1: enable
 R1: configure terminal
 R1: ip route 0.0.0.0 0.0.0.0 203.0.113.1
@@ -584,7 +588,7 @@ register("13-dhcp-relay", t, lab(
              hint="The helper goes on the interface facing the clients, where the broadcasts arrive."),
         task("PC1 gets a lease", [dhcp_lease("PC1")]),
         task("PC1 can ping the DHCP server", [ping("PC1", "192.168.2.10")]),
-    ]), """
+    ], locked=["DHCP"]), """
 R1: enable
 R1: configure terminal
 R1: interface g0/0
@@ -682,7 +686,7 @@ register("16-nat-pat", nat_lab(), lab(
              hint="overload is what lets many hosts share one address, told apart by port."),
         task("PC1 and PC2 reach WEB", [ping("PC1", "WEB"), ping("PC2", "WEB")],
              hint="show ip nat translations lists each flow; the inspector shows each packet's addresses before and after."),
-    ]), """
+    ], locked=["ISP", "WEB"]), """
 R1: enable
 R1: configure terminal
 R1: interface g0/0
@@ -705,7 +709,7 @@ register("17-static-nat", nat_lab(), lab(
              detail="`ip nat inside source static 192.168.1.20 203.0.113.10`",
              hint="R1 answers ARP for 203.0.113.10 on the outside, so the ISP can deliver to it."),
         task("WEB can reach SRV1 at its public address", [ping("WEB", "203.0.113.10")]),
-    ]), """
+    ], locked=["ISP", "WEB"]), """
 R1: enable
 R1: configure terminal
 R1: interface g0/0

@@ -498,10 +498,11 @@ impl Simulation {
         let roots = l2
             .trees
             .values()
-            .filter(|t| t.bridges.len() > 1)
-            .map(|t| RootBridge {
-                vlan: t.vlan,
-                device_id: t.root_device.0,
+            .flat_map(|t| {
+                t.island_roots().into_iter().map(|r| RootBridge {
+                    vlan: t.vlan,
+                    device_id: r.0,
+                })
             })
             .collect();
         Layer2Overlay {
@@ -597,7 +598,7 @@ fn stp_view(l2: &engine::Layer2, vlan: u16) -> StpView {
                 bridge_id: b.id.to_string(),
                 root_cost: b.root_cost,
                 root_port: b.root_port.clone(),
-                is_root: *id == tree.root_device,
+                is_root: tree.root_of(*id) == *id,
                 reason: b.reason.clone(),
             })
             .collect(),

@@ -97,7 +97,19 @@ impl DeviceKind {
     }
 
     pub fn has_port(self, port: &str) -> bool {
-        self.port_names().iter().any(|p| p == port)
+        self.ports().iter().any(|p| p == port)
+    }
+
+    /// The port names, built once per kind (`port_names` allocates a fresh
+    /// list, which hot paths can't afford).
+    pub fn ports(self) -> &'static [String] {
+        static CACHE: std::sync::OnceLock<Vec<Vec<String>>> = std::sync::OnceLock::new();
+        let all = CACHE.get_or_init(|| DeviceKind::ALL.iter().map(|k| k.port_names()).collect());
+        let index = DeviceKind::ALL
+            .iter()
+            .position(|k| *k == self)
+            .expect("every kind is in ALL");
+        &all[index]
     }
 }
 

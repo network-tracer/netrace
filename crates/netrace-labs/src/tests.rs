@@ -121,3 +121,57 @@ fn failing_checks_say_why() {
     );
     let _ = SimTime::ZERO;
 }
+
+#[test]
+fn locked_devices_can_be_looked_at_but_not_changed() {
+    let bundled = bundled_labs()
+        .into_iter()
+        .find(|l| l.id == "16-nat-pat")
+        .unwrap();
+    let mut project = bundled.project();
+    for name in &bundled.lab().locked {
+        assert!(
+            device_id(&project, name).is_some(),
+            "{}: locks {name}, which doesn't exist",
+            bundled.id
+        );
+    }
+    let isp = device_id(&project, "ISP").unwrap();
+    let r1 = device_id(&project, "R1").unwrap();
+    assert!(project.is_locked(isp) && !project.is_locked(r1));
+    let config = project.device(isp).unwrap().config.clone();
+    assert!(matches!(
+        project.set_device_config(isp, config),
+        Err(netrace_doc::DocError::Locked(name)) if name == "ISP"
+    ));
+    assert!(project.rename_device(isp, "Other").is_err());
+    assert!(project.remove_device(isp).is_err());
+    let link = project
+        .links()
+        .iter()
+        .find(|l| l.a.device == isp || l.b.device == isp)
+        .unwrap()
+        .id;
+    assert!(project.disconnect(link).is_err());
+
+    // The console still answers show commands, but won't enter configuration.
+    let mut network = Network::new(project.clone());
+    let mut session = Session::new(isp);
+    let now = SimTime::ZERO;
+    session.execute("enable", &mut project, &mut network, now);
+    let out = session
+        .execute("configure terminal", &mut project, &mut network, now)
+        .output;
+    assert!(out.contains("locked by the lab"), "{out}");
+    let out = session
+        .execute("show ip interface brief", &mut project, &mut network, now)
+        .output;
+    assert!(out.contains("GigabitEthernet0/0"), "{out}");
+    // Every bundled lab locks only devices it has.
+    for b in bundled_labs() {
+        let p = b.project();
+        for name in &b.lab().locked {
+            assert!(device_id(&p, name).is_some(), "{}: locks {name}", b.id);
+        }
+    }
+}

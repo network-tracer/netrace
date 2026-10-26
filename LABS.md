@@ -60,6 +60,11 @@ Add a `lab` object to a project's `project.json`:
 }
 ```
 
+Add `"locked": ["ISP", "WEB"]` to make devices scenery: students can open
+their consoles and use show commands, but can't rename, re-address,
+reconfigure, delete or uncable them (the console stops at `configure
+terminal`). Locked devices carry a small lock badge.
+
 `brief`, `detail` and `hint` take inline Markdown (bold, italics, `code`).
 `detail` shows under the task while it's the current one; `hint` only when
 the student asks. A task is done when all its checks pass.
@@ -107,5 +112,4 @@ is `HQ: …`.
 
 ## Not yet
 
-Locked items (parts of the topology a student can't change), in-app lab
-authoring, and saving progress across lab versions.
+In-app lab authoring, and saving progress across lab versions.

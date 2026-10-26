@@ -143,8 +143,8 @@ impl Simulation {
                     root: l2
                         .trees
                         .get(&vlan)
-                        .filter(|t| t.bridges.len() > 1)
-                        .map(|t| t.root_device.0),
+                        .and_then(|t| t.island_roots().first().copied())
+                        .map(|r| r.0),
                 }
             })
             .collect()

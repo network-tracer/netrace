@@ -15,6 +15,10 @@ pub struct Lab {
     /// What the lab is about and what to do, in Markdown.
     pub brief: String,
     pub tasks: Vec<LabTask>,
+    /// Devices (by name) the student can look at but not change: their
+    /// names, addresses and configuration, and the cables on them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked: Vec<String>,
 }
 
 /// One step of a lab: done when all its checks pass.

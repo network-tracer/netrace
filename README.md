@@ -28,6 +28,14 @@ configure a router in its console and route between two LANs, `examples/office-l
 (pings between configured PCs), `examples/starter.netrace` for a small
 topology, or `examples/campus.netrace` for one that uses every device kind.
 
+## Beta builds
+
+`make beta` runs lint and the tests, then builds an optimised universal
+(Apple silicon + Intel) Release app into `dist/netrace-VERSION-beta.zip`.
+It's signed ad hoc until there's a Developer ID, so on another Mac the first
+launch needs right-click → Open (or System Settings → Privacy & Security →
+Open Anyway).
+
 After changing anything in `crates/`, run `make core` before building in Xcode:
 the app links the static library and Swift bindings that step produces.
 

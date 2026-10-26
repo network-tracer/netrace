@@ -154,6 +154,11 @@ pub struct Network {
     pub(crate) ports: PortStates,
     /// VLAN membership and spanning tree, worked out from the topology.
     pub(crate) l2: Layer2,
+    /// Switchport settings of every switch port, read once per rebuild:
+    /// the forwarding hot path asks for them per port, per frame.
+    pub(crate) switchports: BTreeMap<PortKey, netrace_doc::SwitchportConfig>,
+    /// Switches using anything beyond VLAN 1 (explanations mention VLANs then).
+    pub(crate) vlan_switches: BTreeSet<DeviceId>,
     /// Port security: MACs learned as secure on each port.
     pub(crate) secure: BTreeMap<PortKey, Vec<MacAddr>>,
     /// Ports shut down by a port security violation.
@@ -202,6 +207,8 @@ impl Network {
             ports: PortStates::default(),
             l2: Layer2::default(),
             secure: BTreeMap::new(),
+            switchports: BTreeMap::new(),
+            vlan_switches: BTreeSet::new(),
             psec_disabled: BTreeSet::new(),
             violations: BTreeMap::new(),
             dhcp_clients: BTreeMap::new(),
@@ -328,6 +335,21 @@ impl Network {
         self.trace.clear();
         self.warnings.clear();
         (self.ports, self.l2) = analyse(&self.project);
+        self.switchports.clear();
+        self.vlan_switches.clear();
+        for d in self.project.devices().iter().filter(|d| d.kind.is_switch()) {
+            for port in d.kind.ports() {
+                if let Some(sp) = crate::stp::switchport(&self.project, d.id, port) {
+                    if sp.is_trunk() {
+                        self.vlan_switches.insert(d.id);
+                    }
+                    self.switchports.insert((d.id, port.clone()), sp);
+                }
+            }
+            if !d.config.vlans.is_empty() {
+                self.vlan_switches.insert(d.id);
+            }
+        }
         self.secure.clear();
         self.psec_disabled.clear();
         self.violations.clear();

@@ -257,6 +257,10 @@
         ],
         "hint": "show ip nat translations lists each flow; the inspector shows each packet's addresses before and after."
       }
+    ],
+    "locked": [
+      "ISP",
+      "WEB"
     ]
   }
 }

@@ -162,7 +162,7 @@ struct ProtocolTag: View {
     }
 }
 
-/// "ROOT" in a small gold capsule: the spanning-tree root bridge.
+/// "ROOT" in a small gold rounded rectangle: the spanning-tree root bridge.
 struct RootBadge: View {
     var body: some View {
         Text("ROOT")
@@ -171,8 +171,8 @@ struct RootBadge: View {
             .foregroundStyle(Theme.Palette.onRoot)
             .padding(.horizontal, 4)
             .padding(.vertical, 1.5)
-            .background(Capsule().fill(Theme.Palette.root))
-            .overlay(Capsule().strokeBorder(Theme.Palette.canvas, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(Theme.Palette.root))
+            .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous).strokeBorder(Theme.Palette.canvas, lineWidth: 1))
             .accessibilityLabel("Root bridge")
     }
 }

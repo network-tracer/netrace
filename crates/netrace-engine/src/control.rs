@@ -56,13 +56,19 @@ impl Network {
                 let Some(bridge) = tree.bridges.get(device) else {
                     continue;
                 };
+                let root = tree
+                    .roots
+                    .get(device)
+                    .and_then(|r| tree.bridges.get(r))
+                    .map(|b| b.id)
+                    .unwrap_or(tree.root);
                 if faces_switch {
                     sends.push((
                         *device,
                         port.clone(),
                         Bpdu {
                             vlan: *vlan,
-                            root: tree.root,
+                            root,
                             root_cost: bridge.root_cost,
                             bridge: bridge.id,
                             port: p.number,
@@ -111,7 +117,7 @@ impl Network {
             .l2
             .trees
             .get(&bpdu.vlan)
-            .map(|t| self.name(t.root_device))
+            .map(|t| self.name(t.roots.get(&id).copied().unwrap_or(t.root_device)))
             .unwrap_or_default();
         let (role, reason) = match self.l2.port(id, &arrival.port, bpdu.vlan) {
             Some(p) => (p.role, p.reason.clone()),

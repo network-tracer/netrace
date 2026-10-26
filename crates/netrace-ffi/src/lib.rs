@@ -91,6 +91,8 @@ pub struct DeviceInfo {
     pub dhcp: bool,
     pub color: Option<Swatch>,
     pub group: Option<u64>,
+    /// The lab locks it: look, don't change.
+    pub locked: bool,
 }
 
 /// An end device's IPv4 settings. `mask` is derived from `prefix_len` and
@@ -270,7 +272,14 @@ impl Project {
     pub fn snapshot(&self) -> ProjectSnapshot {
         let project = self.lock();
         ProjectSnapshot {
-            devices: project.devices().iter().map(DeviceInfo::from).collect(),
+            devices: project
+                .devices()
+                .iter()
+                .map(|d| DeviceInfo {
+                    locked: project.is_locked(d.id),
+                    ..DeviceInfo::from(d)
+                })
+                .collect(),
             links: project.links().iter().map(LinkInfo::from).collect(),
             annotations: project
                 .annotations()
@@ -681,6 +690,7 @@ impl From<&doc::Device> for DeviceInfo {
             dhcp: d.dhcp,
             color: d.color.map(Into::into),
             group: d.group.map(|g| g.0),
+            locked: false,
         }
     }
 }

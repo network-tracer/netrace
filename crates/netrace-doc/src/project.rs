@@ -178,6 +178,22 @@ impl Project {
         self.lab = lab;
     }
 
+    /// Whether the lab locks this device.
+    pub fn is_locked(&self, id: DeviceId) -> bool {
+        let (Some(lab), Some(d)) = (&self.lab, self.device(id)) else {
+            return false;
+        };
+        lab.locked.iter().any(|n| n.eq_ignore_ascii_case(&d.name))
+    }
+
+    fn check_unlocked(&self, id: DeviceId) -> Result<(), DocError> {
+        if self.is_locked(id) {
+            let name = self.device(id).map(|d| d.name.clone()).unwrap_or_default();
+            return Err(DocError::Locked(name));
+        }
+        Ok(())
+    }
+
     pub fn from_json(bytes: &[u8]) -> Result<Self, DocError> {
         // Check the header first so a newer file reports a version error
         // rather than a confusing parse error on fields we don't know.
@@ -346,6 +362,7 @@ impl Project {
     /// letters, digits and hyphens, starting with a letter and not ending in a
     /// hyphen) and are unique ignoring case. Returns the previous name.
     pub fn rename_device(&mut self, id: DeviceId, name: &str) -> Result<String, DocError> {
+        self.check_unlocked(id)?;
         let name = name.trim();
         validate_hostname(name)?;
         let taken = self
@@ -365,6 +382,7 @@ impl Project {
         id: DeviceId,
         ip: Option<HostIp>,
     ) -> Result<Option<HostIp>, DocError> {
+        self.check_unlocked(id)?;
         let device = self.device_mut(id)?;
         if !device.kind.is_host() {
             return Err(DocError::NotAHost(device.name.clone()));
@@ -378,6 +396,7 @@ impl Project {
         id: DeviceId,
         config: DeviceConfig,
     ) -> Result<DeviceConfig, DocError> {
+        self.check_unlocked(id)?;
         let device = self.device_mut(id)?;
         if !device.kind.has_cli() {
             return Err(DocError::NoCli(device.name.clone()));
@@ -400,6 +419,7 @@ impl Project {
     /// factory defaults if none was saved). The saved hostname comes back
     /// unless another device has taken it meanwhile.
     pub fn reload_device(&mut self, id: DeviceId) -> Result<(), DocError> {
+        self.check_unlocked(id)?;
         let startup = self
             .device(id)
             .ok_or(DocError::UnknownDevice(id))?
@@ -457,6 +477,9 @@ impl Project {
     ) -> Result<DeviceSettings, DocError> {
         let mut candidate = self.clone();
         let previous = candidate.device_settings(id)?;
+        if previous != settings {
+            self.check_unlocked(id)?;
+        }
         if previous.name != settings.name {
             candidate.rename_device(id, &settings.name)?;
         }
@@ -544,6 +567,7 @@ impl Project {
     /// Switches an end device between DHCP and its static settings;
     /// returns the previous mode.
     pub fn set_host_dhcp(&mut self, id: DeviceId, dhcp: bool) -> Result<bool, DocError> {
+        self.check_unlocked(id)?;
         let device = self.device_mut(id)?;
         if !device.kind.is_host() {
             return Err(DocError::NotAHost(device.name.clone()));
@@ -553,6 +577,7 @@ impl Project {
 
     /// Removes a device and every link attached to it.
     pub fn remove_device(&mut self, id: DeviceId) -> Result<RemovedDevice, DocError> {
+        self.check_unlocked(id)?;
         let index = self
             .devices
             .iter()
@@ -602,6 +627,9 @@ impl Project {
             .iter()
             .position(|l| l.id == id)
             .ok_or(DocError::UnknownLink(id))?;
+        let (a, b) = (self.links[index].a.device, self.links[index].b.device);
+        self.check_unlocked(a)?;
+        self.check_unlocked(b)?;
         Ok(self.links.remove(index))
     }
 

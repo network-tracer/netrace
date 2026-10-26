@@ -127,10 +127,34 @@ pub struct StpBridge {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VlanTree {
     pub vlan: u16,
+    /// The lowest bridge of all; each switched island has its own root (see `roots`).
     pub root: BridgeId,
     pub root_device: DeviceId,
+    /// Each bridge's root: switches only elect among those they can reach,
+    /// so islands of switches separated by routers have a root each.
+    pub roots: BTreeMap<DeviceId, DeviceId>,
     pub bridges: BTreeMap<DeviceId, StpBridge>,
     pub ports: BTreeMap<PortKey, StpPort>,
+}
+
+impl VlanTree {
+    /// The root bridge `id` follows (its island's root).
+    pub fn root_of(&self, id: DeviceId) -> DeviceId {
+        self.roots.get(&id).copied().unwrap_or(self.root_device)
+    }
+
+    /// The root of every island with a choice of root (two or more bridges).
+    pub fn island_roots(&self) -> Vec<DeviceId> {
+        let mut counts: BTreeMap<DeviceId, usize> = BTreeMap::new();
+        for r in self.roots.values() {
+            *counts.entry(*r).or_default() += 1;
+        }
+        counts
+            .into_iter()
+            .filter(|(_, n)| *n > 1)
+            .map(|(r, _)| r)
+            .collect()
+    }
 }
 
 /// The layer 2 picture of a project.
@@ -316,22 +340,31 @@ fn compute(
             .unwrap_or(0)
     };
 
-    // Dijkstra on root path cost, breaking ties as 802.1D does.
+    // Dijkstra on root path cost, breaking ties as 802.1D does, once per
+    // island of connected switches, each from its own lowest bridge.
     let mut cost: BTreeMap<DeviceId, u32> = BTreeMap::new();
-    cost.insert(root_device, 0);
+    let mut roots: BTreeMap<DeviceId, DeviceId> = BTreeMap::new();
     let mut done: BTreeSet<DeviceId> = BTreeSet::new();
-    while let Some((&bridge, &c)) = cost
+    while let Some((&island_root, _)) = bridge_ids
         .iter()
         .filter(|(b, _)| !done.contains(*b))
-        .min_by_key(|(b, c)| (**c, bridge_ids[*b]))
+        .min_by_key(|(_, b)| **b)
     {
-        done.insert(bridge);
-        for (port, _) in &members[&bridge] {
-            for peer in peers(&(bridge, port.clone())) {
-                let candidate = c + port_cost(&peer.1);
-                let entry = cost.entry(peer.0).or_insert(u32::MAX);
-                if candidate < *entry {
-                    *entry = candidate;
+        cost.insert(island_root, 0);
+        while let Some((&bridge, &c)) = cost
+            .iter()
+            .filter(|(b, _)| !done.contains(*b))
+            .min_by_key(|(b, c)| (**c, bridge_ids[*b]))
+        {
+            done.insert(bridge);
+            roots.insert(bridge, island_root);
+            for (port, _) in &members[&bridge] {
+                for peer in peers(&(bridge, port.clone())) {
+                    let candidate = c + port_cost(&peer.1);
+                    let entry = cost.entry(peer.0).or_insert(u32::MAX);
+                    if candidate < *entry {
+                        *entry = candidate;
+                    }
                 }
             }
         }
@@ -351,6 +384,7 @@ fn compute(
         vlan,
         root,
         root_device,
+        roots: roots.clone(),
         bridges: BTreeMap::new(),
         ports: BTreeMap::new(),
     };
@@ -358,8 +392,10 @@ fn compute(
         let Some(&root_cost) = cost.get(&bridge) else {
             continue;
         };
+        let my_root = roots[&bridge];
+        let my_root_id = bridge_ids[&my_root];
         // Root port: the best way towards the root through a designated port.
-        let root_port = (bridge != root_device)
+        let root_port = (bridge != my_root)
             .then(|| {
                 bridge_ports
                     .iter()
@@ -388,19 +424,20 @@ fn compute(
                 .map(|d| d.name.clone())
                 .unwrap_or_default()
         };
-        let reason = if bridge == root_device {
+        let reason = if bridge == my_root {
             format!(
-                "{} has the lowest bridge ID (priority {}, MAC {}), so every switch elects it root.",
+                "{} has the lowest bridge ID (priority {}, MAC {}) of the switches it's connected to, so they elect it \
+                 root.",
                 name(bridge),
-                root.priority,
-                root.mac
+                my_root_id.priority,
+                my_root_id.mac
             )
         } else {
             format!(
                 "{} isn't root: {} has the lower bridge ID ({} beats {}). Its cheapest path to the root costs {root_cost}.",
                 name(bridge),
-                name(root_device),
-                root,
+                name(my_root),
+                my_root_id,
                 bridge_ids[&bridge]
             )
         };
@@ -433,7 +470,7 @@ fn compute(
                     name(bridge),
                     port_cost(port)
                 ),
-                PortRole::Designated if bridge == root_device => {
+                PortRole::Designated if bridge == my_root => {
                     format!(
                         "Designated: every port of the root bridge forwards, so {p} is designated for its link."
                     )
@@ -494,6 +531,8 @@ impl Layer2 {
     ) -> (Layer2, Vec<StpChange>) {
         let before = Layer2::for_project(project);
         let mut failed = project.clone();
+        // A replay, not an edit: the lab's locks don't apply.
+        failed.set_lab(None);
         let _ = failed.disconnect(link);
         let after = Layer2::for_project(&failed);
         let name = |id: DeviceId| {
