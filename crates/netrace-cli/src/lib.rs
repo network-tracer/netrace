@@ -33,6 +33,12 @@ pub fn running_config(project: &Project, device: DeviceId) -> Option<String> {
     d.kind.has_cli().then(|| render::running_config(d))
 }
 
+/// The full IOS name for an interface typed short ("g0/1" →
+/// "GigabitEthernet0/1"), if the device has such an interface type.
+pub fn interface_name(text: &str, kind: netrace_doc::DeviceKind) -> Option<String> {
+    iface::parse(text, kind)
+}
+
 /// What a line did.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Response {

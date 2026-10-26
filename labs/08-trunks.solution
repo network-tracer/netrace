@@ -1,0 +1,10 @@
+SW1: enable
+SW1: configure terminal
+SW1: interface g0/1
+SW1: switchport mode trunk
+SW1: end
+SW2: enable
+SW2: configure terminal
+SW2: interface g0/1
+SW2: switchport mode trunk
+SW2: end

@@ -1,0 +1,7 @@
+SW1: enable
+SW1: configure terminal
+SW1: interface fa0/1
+SW1: switchport mode access
+SW1: switchport port-security
+SW1: switchport port-security mac-address sticky
+SW1: end

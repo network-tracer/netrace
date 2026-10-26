@@ -220,6 +220,9 @@ final class WorkspaceModel: ObservableObject {
         stpStep = 0
     }
 
+    /// The bundled-lab browser sheet.
+    @Published var showsLabBrowser = false
+
     /// OSPF view: a link failure being replayed.
     @Published var ospfFailedLink: UInt64?
     @Published var ospfStep = 0

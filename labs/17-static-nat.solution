@@ -1,0 +1,9 @@
+R1: enable
+R1: configure terminal
+R1: interface g0/0
+R1: ip nat inside
+R1: interface g0/1
+R1: ip nat outside
+R1: exit
+R1: ip nat inside source static 192.168.1.20 203.0.113.10
+R1: end

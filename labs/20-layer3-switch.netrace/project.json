@@ -1,0 +1,146 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 6,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "l3_switch",
+      "name": "DSW1",
+      "position": {
+        "x": 480.0,
+        "y": 200.0
+      }
+    },
+    {
+      "id": 2,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 360.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.10.11",
+        "prefix_len": 24,
+        "gateway": "192.168.10.1"
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 600.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.20.11",
+        "prefix_len": 24,
+        "gateway": "192.168.20.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 4,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet1/0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet1/0/2"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "Routing on a layer 3 switch",
+    "topic": "Switching",
+    "brief": "A multilayer switch can route between VLANs itself, with no router: one **SVI** (interface Vlan N) per VLAN as the gateway, and `ip routing` turned on.",
+    "tasks": [
+      {
+        "title": "VLANs 10 and 20 with a port each",
+        "checks": [
+          {
+            "check": "vlan",
+            "device": "DSW1",
+            "vlan": 10
+          },
+          {
+            "check": "vlan",
+            "device": "DSW1",
+            "vlan": 20
+          },
+          {
+            "check": "access_port",
+            "device": "DSW1",
+            "port": "Gi1/0/1",
+            "vlan": 10
+          },
+          {
+            "check": "access_port",
+            "device": "DSW1",
+            "port": "Gi1/0/2",
+            "vlan": 20
+          }
+        ]
+      },
+      {
+        "title": "SVIs are the gateways",
+        "checks": [
+          {
+            "check": "address",
+            "device": "DSW1",
+            "address": "192.168.10.1",
+            "prefix_len": 24,
+            "interface": "Vlan10"
+          },
+          {
+            "check": "address",
+            "device": "DSW1",
+            "address": "192.168.20.1",
+            "prefix_len": 24,
+            "interface": "Vlan20"
+          }
+        ],
+        "detail": "`interface vlan 10`, `ip address 192.168.10.1 255.255.255.0`, `no shutdown`."
+      },
+      {
+        "title": "Routing is on",
+        "checks": [
+          {
+            "check": "config",
+            "device": "DSW1",
+            "contains": "ip routing"
+          }
+        ],
+        "hint": "Without ip routing the switch answers pings to its SVIs but won't forward between them."
+      },
+      {
+        "title": "PC1 can ping PC2",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC2"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -11,9 +11,11 @@ use netrace_doc as doc;
 uniffi::setup_scaffolding!();
 
 mod console;
+mod labs;
 mod simulation;
 mod style;
 pub use console::*;
+pub use labs::*;
 pub use simulation::*;
 pub use style::*;
 

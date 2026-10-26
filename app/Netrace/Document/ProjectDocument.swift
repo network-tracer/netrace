@@ -25,6 +25,12 @@ final class ProjectDocument: ReferenceFileDocument, @unchecked Sendable {
         _state = Published(initialValue: project.snapshot())
     }
 
+    /// A new, untitled document holding a copy of a bundled lab.
+    init(json: Data) throws {
+        project = try Project.fromJson(data: json)
+        _state = Published(initialValue: project.snapshot())
+    }
+
     required init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.fileWrappers?[projectFileName()]?.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
@@ -215,6 +221,9 @@ extension ProjectDocument {
     }
 
     /// A fresh simulation of the current topology.
+    /// The lab this project carries, if it is one.
+    var lab: LabInfo? { project.lab() }
+
     func makeSimulation() -> Simulation {
         Simulation(project: project)
     }

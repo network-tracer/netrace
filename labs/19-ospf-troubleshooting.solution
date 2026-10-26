@@ -1,0 +1,11 @@
+R2: enable
+R2: configure terminal
+R2: router ospf 1
+R2: no network 10.0.23.0 0.0.0.255 area 1
+R2: network 10.0.23.0 0.0.0.255 area 0
+R2: end
+R1: enable
+R1: configure terminal
+R1: interface g0/2
+R1: no ip ospf hello-interval
+R1: end

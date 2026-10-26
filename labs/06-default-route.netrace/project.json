@@ -1,0 +1,169 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 8,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 360.0,
+        "y": 220.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "address": {
+              "address": "203.0.113.2",
+              "prefix_len": 30
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "router",
+      "name": "ISP",
+      "position": {
+        "x": 620.0,
+        "y": 220.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "198.51.100.1",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "address": {
+              "address": "203.0.113.1",
+              "prefix_len": 30
+            }
+          }
+        },
+        "routes": [
+          {
+            "network": "192.168.1.0",
+            "prefix_len": 24,
+            "target": {
+              "next_hop": "203.0.113.2"
+            },
+            "distance": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 240.0,
+        "y": 400.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 4,
+      "kind": "server",
+      "name": "WEB",
+      "position": {
+        "x": 740.0,
+        "y": 400.0
+      },
+      "ip": {
+        "address": "198.51.100.10",
+        "prefix_len": 24,
+        "gateway": "198.51.100.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 6,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 2,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 4,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "A default route to the ISP",
+    "topic": "Routing",
+    "brief": "R1 connects the office to an ISP. Rather than a route for every network on the internet, give it one **default route** that sends everything it doesn't know to the ISP.",
+    "tasks": [
+      {
+        "title": "R1 has a default route",
+        "checks": [
+          {
+            "check": "route",
+            "device": "R1",
+            "network": "0.0.0.0",
+            "prefix_len": 0,
+            "source": "static"
+          }
+        ],
+        "detail": "`ip route 0.0.0.0 0.0.0.0 203.0.113.1`",
+        "hint": "0.0.0.0/0 matches every address, but only when nothing more specific does."
+      },
+      {
+        "title": "PC1 can reach WEB",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "WEB"
+          }
+        ]
+      }
+    ]
+  }
+}

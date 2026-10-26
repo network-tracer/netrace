@@ -1,0 +1,14 @@
+SW1: enable
+SW1: configure terminal
+SW1: vlan 10
+SW1: name Sales
+SW1: vlan 20
+SW1: name Staff
+SW1: exit
+SW1: interface range fa0/1, fa0/3
+SW1: switchport mode access
+SW1: switchport access vlan 10
+SW1: interface range fa0/2, fa0/4
+SW1: switchport mode access
+SW1: switchport access vlan 20
+SW1: end

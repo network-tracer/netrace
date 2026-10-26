@@ -324,10 +324,21 @@ dependencies = [
  "netrace-cli",
  "netrace-doc",
  "netrace-engine",
+ "netrace-labs",
  "netrace-sim",
  "serde_json",
  "thiserror",
  "uniffi",
+]
+
+[[package]]
+name = "netrace-labs"
+version = "0.1.0"
+dependencies = [
+ "netrace-cli",
+ "netrace-doc",
+ "netrace-engine",
+ "netrace-sim",
 ]
 
 [[package]]

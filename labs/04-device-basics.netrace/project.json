@@ -1,0 +1,84 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 2,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "Router",
+      "position": {
+        "x": 480.0,
+        "y": 240.0
+      }
+    }
+  ],
+  "links": [],
+  "annotations": [],
+  "lab": {
+    "title": "Securing a new router",
+    "topic": "Device management",
+    "brief": "A new router needs a name, an enable secret, a console password and a login banner before it goes into the rack. Do it all from its console.",
+    "tasks": [
+      {
+        "title": "Name the router HQ",
+        "checks": [
+          {
+            "check": "config",
+            "device": "HQ",
+            "contains": "hostname HQ"
+          }
+        ],
+        "detail": "In global configuration: `hostname HQ`. The prompt changes straight away."
+      },
+      {
+        "title": "Protect privileged mode with an enable secret",
+        "checks": [
+          {
+            "check": "config",
+            "device": "HQ",
+            "contains": "enable secret"
+          }
+        ],
+        "hint": "enable secret stores a hash; enable password doesn't, so prefer secret."
+      },
+      {
+        "title": "Require a password on the console",
+        "checks": [
+          {
+            "check": "config",
+            "device": "HQ",
+            "contains": "line con 0"
+          },
+          {
+            "check": "config",
+            "device": "HQ",
+            "contains": " login"
+          }
+        ],
+        "detail": "`line console 0`, `password cisco`, `login`."
+      },
+      {
+        "title": "Encrypt plain-text passwords",
+        "checks": [
+          {
+            "check": "config",
+            "device": "HQ",
+            "contains": "service password-encryption"
+          }
+        ]
+      },
+      {
+        "title": "Add a login banner",
+        "checks": [
+          {
+            "check": "config",
+            "device": "HQ",
+            "contains": "banner motd"
+          }
+        ],
+        "hint": "banner motd # Authorised access only #  (any character can delimit the text)."
+      }
+    ]
+  }
+}

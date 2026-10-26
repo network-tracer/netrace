@@ -1,0 +1,158 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 8,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 480.0,
+        "y": 140.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 480.0,
+        "y": 280.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 360.0,
+        "y": 440.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 600.0,
+        "y": 440.0
+      },
+      "dhcp": true
+    }
+  ],
+  "links": [
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 6,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "A DHCP server on the router",
+    "topic": "Services",
+    "brief": "PC1 and PC2 are set to DHCP, but nothing answers, so they give themselves 169.254 addresses. Make R1 hand out 192.168.1.0/24, keeping .1 to .10 for fixed devices.",
+    "tasks": [
+      {
+        "title": "Keep 192.168.1.1\u201310 out of the pool",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "ip dhcp excluded-address 192.168.1.1 192.168.1.10"
+          }
+        ]
+      },
+      {
+        "title": "Create a pool for the LAN",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "ip dhcp pool"
+          },
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "network 192.168.1.0 255.255.255.0"
+          },
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "default-router 192.168.1.1"
+          }
+        ],
+        "detail": "`ip dhcp pool LAN`, `network 192.168.1.0 255.255.255.0`, `default-router 192.168.1.1`.",
+        "hint": "Without default-router the PCs get an address but no gateway."
+      },
+      {
+        "title": "Both PCs get a lease",
+        "checks": [
+          {
+            "check": "dhcp_lease",
+            "device": "PC1"
+          },
+          {
+            "check": "dhcp_lease",
+            "device": "PC2"
+          }
+        ],
+        "detail": "Run `ipconfig /renew` on a PC, or watch the Events tab: Discover, Offer, Request, Acknowledge."
+      },
+      {
+        "title": "PC1 can ping its gateway",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "192.168.1.1"
+          }
+        ]
+      }
+    ]
+  }
+}

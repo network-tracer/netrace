@@ -4,13 +4,6 @@ import Foundation
 /// the IOS console and running-config of routers and switches (M3) and labs
 /// (M6). Every panel showing it carries a preview badge.
 enum PreviewData {
-    struct LabTask: Identifiable {
-        let id: Int
-        let title: String
-        let detail: String
-        let isDone: Bool
-    }
-
     // MARK: Console (network devices)
 
     static func transcript(for device: DeviceInfo, in snapshot: ProjectSnapshot) -> String {
@@ -71,20 +64,4 @@ enum PreviewData {
         lines += ["line con 0", " logging synchronous", "line vty 0 4", " login", "!", "end"]
         return lines.joined(separator: "\n")
     }
-
-    // MARK: Lab
-
-    static let labTitle = "Lab 1 · Build a small office LAN"
-    static let labBrief = """
-    Connect two PCs to a switch and the switch to a router. Give each PC an address in \
-    192.168.1.0/24 with the router as default gateway, then prove both PCs can reach it.
-    """
-    static let labTasks: [LabTask] = [
-        LabTask(id: 1, title: "Place a router, a switch and two PCs", detail: "Any names", isDone: true),
-        LabTask(id: 2, title: "Cable both PCs to the switch", detail: "Copper, access ports", isDone: true),
-        LabTask(id: 3, title: "Uplink the switch to the router", detail: "Router Gi0/0", isDone: false),
-        LabTask(id: 4, title: "Address the router interface", detail: "192.168.1.1/24, no shutdown", isDone: false),
-        LabTask(id: 5, title: "Address both PCs", detail: "Gateway 192.168.1.1", isDone: false),
-        LabTask(id: 6, title: "PC1 can ping the gateway", detail: "Checked by simulation", isDone: false),
-    ]
 }

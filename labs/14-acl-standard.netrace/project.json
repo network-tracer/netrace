@@ -1,0 +1,204 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 12,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 480.0,
+        "y": 160.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.2.1",
+              "prefix_len": 24
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 300.0,
+        "y": 300.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "l2_switch",
+      "name": "SW2",
+      "position": {
+        "x": 660.0,
+        "y": 300.0
+      }
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 300.0,
+        "y": 460.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 5,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 660.0,
+        "y": 460.0
+      },
+      "ip": {
+        "address": "192.168.2.10",
+        "prefix_len": 24,
+        "gateway": "192.168.2.1"
+      }
+    },
+    {
+      "id": 10,
+      "kind": "pc",
+      "name": "PC3",
+      "position": {
+        "x": 420.0,
+        "y": 460.0
+      },
+      "ip": {
+        "address": "192.168.1.20",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 6,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 3,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 8,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 9,
+      "a": {
+        "device": 3,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 5,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 11,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 10,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "A standard access list",
+    "topic": "Security",
+    "brief": "PC1 and PC3 are on the office LAN; PC2's LAN holds payroll. Only PC1 may reach it. Write a **standard ACL** that permits PC1 and denies the rest, and apply it outbound on R1 Gi0/1, close to the destination.",
+    "tasks": [
+      {
+        "title": "Access list 10 permits PC1",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "access-list 10 permit 192.168.1.10"
+          }
+        ],
+        "detail": "`access-list 10 permit host 192.168.1.10`",
+        "hint": "Every ACL ends with an invisible deny any, so you don't need to write the deny."
+      },
+      {
+        "title": "It's applied out on Gi0/1",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "ip access-group 10 out"
+          }
+        ],
+        "detail": "`interface g0/1`, `ip access-group 10 out`."
+      },
+      {
+        "title": "PC1 reaches payroll, PC3 doesn't",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC2"
+          },
+          {
+            "check": "ping",
+            "from": "PC3",
+            "to": "PC2",
+            "succeeds": false
+          }
+        ],
+        "hint": "Click the dropped event in the Events tab: the inspector shows the line that matched."
+      }
+    ]
+  }
+}

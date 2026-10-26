@@ -1,0 +1,15 @@
+R1: enable
+R1: configure terminal
+R1: router ospf 1
+R1: network 0.0.0.0 255.255.255.255 area 0
+R1: end
+R2: enable
+R2: configure terminal
+R2: router ospf 1
+R2: network 0.0.0.0 255.255.255.255 area 0
+R2: end
+R3: enable
+R3: configure terminal
+R3: router ospf 1
+R3: network 0.0.0.0 255.255.255.255 area 0
+R3: end

@@ -327,7 +327,7 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | M4 ✅ | Switching | VLANs, trunks, STP, CDP/LLDP, port security; VLAN tinting and STP markers on the canvas; router-on-a-stick and SVI routing |
 | M5 | Services | DHCP ✅ (server, relay, APIPA, DORA in the trace) and ACLs ✅ (standard / extended, numbered / named, deciding line in the inspector, shield badges), NAT/PAT ✅ (static, pool, overload; before / after addresses and the rule in the inspector, inside / outside badges), OSPF ✅ (neighbours with mismatch reasons, DR / BDR election, LSDB, SPF with equal-cost paths, inter-area and default routes) |
 | M5.5 | Protocol views | STP view ✅ (roles, reasons, blocked ports, reconvergence when a link fails), OSPF view ✅ (router IDs, neighbours, elections, routes and why, LSDB, cost and DR / BDR labels on the canvas, link-failure replay), ACL / NAT / DHCP shown in the packet inspector ✅; still to do: OSPF hellos and LSAs as packets in the trace |
-| M6 | Labs + polish | Lab engine, 20 labs, performance pass, beta |
+| M6 | Labs + polish | Lab engine ✅ (checks on simulated state, live progress, per-check feedback, hints), 20 labs ✅ (each proven by a scripted solution, see LABS.md); still to do: locked items, performance pass, beta |
 
 ## Quality targets
 

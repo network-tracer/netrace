@@ -1,0 +1,191 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 10,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 480.0,
+        "y": 160.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.2.1",
+              "prefix_len": 24
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 320.0,
+        "y": 300.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 240.0,
+        "y": 460.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 400.0,
+        "y": 460.0
+      },
+      "ip": {
+        "address": "192.168.1.11",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 5,
+      "kind": "server",
+      "name": "SRV1",
+      "position": {
+        "x": 660.0,
+        "y": 300.0
+      },
+      "ip": {
+        "address": "192.168.2.10",
+        "prefix_len": 24,
+        "gateway": "192.168.2.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 6,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 8,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 9,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 5,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "An extended access list",
+    "topic": "Security",
+    "brief": "Stop PC2 from pinging SRV1 without blocking anything else. An **extended ACL** can match the protocol and the destination as well as the source, so apply it inbound on Gi0/0, close to PC2.",
+    "tasks": [
+      {
+        "title": "ACL 101 denies pings from PC2 to SRV1",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "access-list 101 deny icmp host 192.168.1.11 host 192.168.2.10"
+          }
+        ],
+        "detail": "`access-list 101 deny icmp host 192.168.1.11 host 192.168.2.10`"
+      },
+      {
+        "title": "\u2026and permits everything else",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "access-list 101 permit ip any any"
+          }
+        ],
+        "hint": "Without this line the implicit deny at the end blocks all traffic."
+      },
+      {
+        "title": "It's applied in on Gi0/0",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "ip access-group 101 in"
+          }
+        ]
+      },
+      {
+        "title": "PC2 can't ping SRV1; PC1 can",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC2",
+            "to": "SRV1",
+            "succeeds": false
+          },
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "SRV1"
+          }
+        ]
+      }
+    ]
+  }
+}

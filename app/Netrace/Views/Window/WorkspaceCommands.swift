@@ -7,6 +7,11 @@ struct WorkspaceCommands: Commands {
     @FocusedObject private var simulation: SimulationController?
 
     var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("New from Lab…") { workspace?.showsLabBrowser = true }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(workspace == nil)
+        }
         CommandGroup(after: .pasteboard) {
             Button("Duplicate") { workspace?.duplicateRequests += 1 }
                 .keyboardShortcut("d")

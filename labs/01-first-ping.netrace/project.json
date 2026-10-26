@@ -1,0 +1,103 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 6,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 480.0,
+        "y": 240.0
+      }
+    },
+    {
+      "id": 2,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 360.0,
+        "y": 420.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 600.0,
+        "y": 420.0
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 4,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "Your first ping",
+    "topic": "Getting started",
+    "brief": "Two PCs share a switch but have no IP addresses yet. Give each one an address in **192.168.1.0/24**, then ping between them and watch the exchange in the Events tab.\n\nSelect a PC and set its address in the Inspector.",
+    "tasks": [
+      {
+        "title": "Address PC1 as 192.168.1.10/24",
+        "checks": [
+          {
+            "check": "address",
+            "device": "PC1",
+            "address": "192.168.1.10",
+            "prefix_len": 24
+          }
+        ],
+        "hint": "Select PC1, then in the Inspector's IP Configuration type 192.168.1.10 and mask 255.255.255.0."
+      },
+      {
+        "title": "Address PC2 as 192.168.1.11/24",
+        "checks": [
+          {
+            "check": "address",
+            "device": "PC2",
+            "address": "192.168.1.11",
+            "prefix_len": 24
+          }
+        ]
+      },
+      {
+        "title": "Ping PC2 from PC1",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC2"
+          }
+        ],
+        "detail": "Double-click PC1 to open its console and type `ping 192.168.1.11`.",
+        "hint": "The first reply may take longer: PC1 asks for PC2's MAC address with ARP first."
+      }
+    ]
+  }
+}

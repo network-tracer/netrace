@@ -1,0 +1,157 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 8,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 340.0,
+        "y": 200.0
+      },
+      "config": {
+        "vlans": {
+          "10": {
+            "name": "Sales"
+          }
+        },
+        "interfaces": {
+          "FastEthernet0/1": {
+            "switchport": {
+              "access_vlan": 10
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "l2_switch",
+      "name": "SW2",
+      "position": {
+        "x": 620.0,
+        "y": 200.0
+      },
+      "config": {
+        "vlans": {
+          "10": {
+            "name": "Sales"
+          }
+        },
+        "interfaces": {
+          "FastEthernet0/1": {
+            "switchport": {
+              "access_vlan": 10
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 340.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.10.11",
+        "prefix_len": 24
+      }
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC3",
+      "position": {
+        "x": 620.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.10.12",
+        "prefix_len": 24
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 6,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "Carrying VLANs between switches",
+    "topic": "Switching",
+    "brief": "PC1 and PC3 are both in VLAN 10, but on different switches. The link between the switches is an access port in VLAN 1, so VLAN 10 can't cross it. Make it a **trunk**.",
+    "tasks": [
+      {
+        "title": "SW1 Gi0/1 is a trunk",
+        "checks": [
+          {
+            "check": "trunk",
+            "device": "SW1",
+            "port": "g0/1"
+          }
+        ],
+        "detail": "`interface g0/1`, `switchport mode trunk`."
+      },
+      {
+        "title": "SW2 Gi0/1 is a trunk",
+        "checks": [
+          {
+            "check": "trunk",
+            "device": "SW2",
+            "port": "g0/1"
+          }
+        ]
+      },
+      {
+        "title": "PC1 can ping PC3",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC3"
+          }
+        ],
+        "hint": "Frames on the trunk carry an 802.1Q tag saying which VLAN they belong to. Look for it in the inspector."
+      }
+    ]
+  }
+}

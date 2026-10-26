@@ -19,7 +19,8 @@ make test    # Rust tests
 make lint    # rustfmt + clippy
 ```
 
-Open `examples/services.netrace` for a DHCP and access list lab,
+Choose **File → New from Lab…** (⌥⌘N) for 20 guided CCNA labs that check
+your work as you go (see [LABS.md](LABS.md)). Or open `examples/services.netrace` for a DHCP and access list lab,
 `examples/nat.netrace` for NAT and PAT, `examples/ospf.netrace` for OSPF,
 `examples/vlans.netrace` for a VLAN, trunk and router-on-a-stick lab
 (with a redundant link spanning tree blocks), `examples/two-lans.netrace` to
@@ -38,6 +39,7 @@ crates/
   netrace-doc/   project model + .netrace file format (JSON, validated on load)
   netrace-engine/ network simulation: VLANs, spanning tree, routing, ARP, ICMP, explained traces
   netrace-cli/   IOS-style command line: modes, parser, help, show output
+  netrace-labs/  lab checks on simulated state, and the bundled labs
   netrace-ffi/   UniFFI bridge: the only API the Swift app sees
 app/
   project.yml    XcodeGen spec (the .xcodeproj is generated, not committed)
@@ -51,6 +53,8 @@ design/
 scripts/
   build-core.sh        Rust → NetraceCore.xcframework + Generated/netrace_ffi.swift
   render-app-icon.sh   design/app-icon.svg → AppIcon.appiconset (needs librsvg)
+  make-labs.py         generates labs/ (topologies, tasks, checks, solutions)
+labs/            the 20 bundled labs and their solution scripts
 examples/        sample projects
 ```
 

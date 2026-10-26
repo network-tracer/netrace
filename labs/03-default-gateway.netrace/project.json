@@ -1,0 +1,180 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 10,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 480.0,
+        "y": 160.0
+      }
+    },
+    {
+      "id": 2,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 300.0,
+        "y": 300.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "l2_switch",
+      "name": "SW2",
+      "position": {
+        "x": 660.0,
+        "y": 300.0
+      }
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 300.0,
+        "y": 460.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24
+      }
+    },
+    {
+      "id": 5,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 660.0,
+        "y": 460.0
+      },
+      "ip": {
+        "address": "192.168.2.10",
+        "prefix_len": 24
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 6,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 3,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 8,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 9,
+      "a": {
+        "device": 3,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 5,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "Routing between two LANs",
+    "topic": "Routing",
+    "brief": "R1 joins two LANs, but its interfaces have no addresses and are shut down, and the PCs have no default gateway. Make PC1 and PC2 reach each other through R1.\n\nOpen R1's console (double-click it).",
+    "tasks": [
+      {
+        "title": "R1 Gi0/0 is 192.168.1.1/24 and up",
+        "checks": [
+          {
+            "check": "address",
+            "device": "R1",
+            "address": "192.168.1.1",
+            "prefix_len": 24,
+            "interface": "g0/0"
+          },
+          {
+            "check": "interface_up",
+            "device": "R1",
+            "interface": "g0/0"
+          }
+        ],
+        "detail": "`enable`, `configure terminal`, `interface g0/0`, `ip address 192.168.1.1 255.255.255.0`, `no shutdown`.",
+        "hint": "Router interfaces start shut down. no shutdown brings the interface up."
+      },
+      {
+        "title": "R1 Gi0/1 is 192.168.2.1/24 and up",
+        "checks": [
+          {
+            "check": "address",
+            "device": "R1",
+            "address": "192.168.2.1",
+            "prefix_len": 24,
+            "interface": "g0/1"
+          },
+          {
+            "check": "interface_up",
+            "device": "R1",
+            "interface": "g0/1"
+          }
+        ]
+      },
+      {
+        "title": "Each PC uses R1 as its gateway",
+        "checks": [
+          {
+            "check": "gateway",
+            "device": "PC1",
+            "gateway": "192.168.1.1"
+          },
+          {
+            "check": "gateway",
+            "device": "PC2",
+            "gateway": "192.168.2.1"
+          }
+        ],
+        "hint": "A PC sends anything outside its own network to its default gateway."
+      },
+      {
+        "title": "PC1 can ping PC2",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC2"
+          }
+        ]
+      }
+    ]
+  }
+}

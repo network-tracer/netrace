@@ -1,0 +1,10 @@
+R1: enable
+R1: configure terminal
+R1: interface g0/0
+R1: ip nat inside
+R1: interface g0/1
+R1: ip nat outside
+R1: exit
+R1: access-list 1 permit 192.168.1.0 0.0.0.255
+R1: ip nat inside source list 1 interface g0/1 overload
+R1: end

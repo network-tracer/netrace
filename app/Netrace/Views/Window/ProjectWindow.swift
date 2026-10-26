@@ -62,7 +62,17 @@ struct ProjectWindow: View {
         .focusedSceneObject(simulation)
         .focusedSceneObject(workspace)
         .focusedSceneObject(document)
-        .onAppear { simulation.sync(with: document) }
+        .sheet(isPresented: $workspace.showsLabBrowser) {
+            LabBrowser(workspace: workspace)
+        }
+        .onAppear {
+            simulation.sync(with: document)
+            // A lab opens on its instructions.
+            if document.lab != nil {
+                workspace.rightPane = .lab
+                workspace.showsInspector = true
+            }
+        }
         .onChange(of: document.state) { _, state in
             workspace.prune(devices: Set(state.devices.map(\.id)), links: Set(state.links.map(\.id)),
                             annotations: Set(state.annotations.map(\.id)))

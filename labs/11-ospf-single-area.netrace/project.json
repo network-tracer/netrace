@@ -1,0 +1,270 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 11,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 340.0,
+        "y": 300.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.12.1",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/2": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.13.1",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/3": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            }
+          },
+          "Loopback0": {
+            "shutdown": false,
+            "address": {
+              "address": "1.1.1.1",
+              "prefix_len": 32
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "router",
+      "name": "R2",
+      "position": {
+        "x": 480.0,
+        "y": 140.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.12.2",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.23.2",
+              "prefix_len": 24
+            }
+          },
+          "Loopback0": {
+            "shutdown": false,
+            "address": {
+              "address": "2.2.2.2",
+              "prefix_len": 32
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "kind": "router",
+      "name": "R3",
+      "position": {
+        "x": 620.0,
+        "y": 300.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.23.3",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/2": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.13.3",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/3": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.3.1",
+              "prefix_len": 24
+            }
+          },
+          "Loopback0": {
+            "shutdown": false,
+            "address": {
+              "address": "3.3.3.3",
+              "prefix_len": 32
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 220.0,
+        "y": 440.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 8,
+      "kind": "pc",
+      "name": "PC3",
+      "position": {
+        "x": 740.0,
+        "y": 440.0
+      },
+      "ip": {
+        "address": "192.168.3.10",
+        "prefix_len": 24,
+        "gateway": "192.168.3.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 4,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 5,
+      "a": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 3,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 6,
+      "a": {
+        "device": 3,
+        "port": "GigabitEthernet0/2"
+      },
+      "b": {
+        "device": 1,
+        "port": "GigabitEthernet0/2"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 9,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/3"
+      },
+      "b": {
+        "device": 7,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 10,
+      "a": {
+        "device": 3,
+        "port": "GigabitEthernet0/3"
+      },
+      "b": {
+        "device": 8,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "OSPF in one area",
+    "topic": "Routing",
+    "brief": "Three routers in a triangle, all addressed, no routing protocol. Turn on **OSPF** in area 0 on all three so they learn every network on their own.\n\nOpen the OSPF tab to watch neighbours come up and see why each route was chosen.",
+    "tasks": [
+      {
+        "title": "R1 runs OSPF with both neighbours",
+        "checks": [
+          {
+            "check": "ospf_neighbors",
+            "device": "R1",
+            "count": 2
+          }
+        ],
+        "detail": "`router ospf 1`, `network 0.0.0.0 255.255.255.255 area 0`.",
+        "hint": "A neighbour only comes up when both ends run OSPF; R1 alone shows none."
+      },
+      {
+        "title": "R2 and R3 run OSPF too",
+        "checks": [
+          {
+            "check": "ospf_neighbors",
+            "device": "R2",
+            "count": 2
+          },
+          {
+            "check": "ospf_neighbors",
+            "device": "R3",
+            "count": 2
+          }
+        ]
+      },
+      {
+        "title": "R1 learns PC3's network from OSPF",
+        "checks": [
+          {
+            "check": "route",
+            "device": "R1",
+            "network": "192.168.3.0",
+            "prefix_len": 24,
+            "source": "ospf"
+          }
+        ]
+      },
+      {
+        "title": "PC1 can ping PC3",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC3"
+          }
+        ]
+      }
+    ]
+  }
+}

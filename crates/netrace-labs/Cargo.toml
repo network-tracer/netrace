@@ -1,0 +1,13 @@
+[package]
+name = "netrace-labs"
+description = "netrace labs: checks on simulated state, and the bundled CCNA labs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+netrace-doc.workspace = true
+netrace-engine.workspace = true
+netrace-cli.workspace = true
+netrace-sim.workspace = true

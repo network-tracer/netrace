@@ -196,6 +196,17 @@ final class SimulationController: ObservableObject {
     private var ospfCache: (key: String, view: OspfView)?
     private var ospfFailureCache: (key: String, link: UInt64, failure: OspfFailure)?
 
+    private var labCache: (key: String, results: [LabTaskResult])?
+
+    /// Lab progress for the topology as it is now; worked out once per change.
+    func labResults() -> [LabTaskResult] {
+        guard let simulation else { return [] }
+        if let cache = labCache, cache.key == topologyKey { return cache.results }
+        let results = simulation.labResults()
+        labCache = (topologyKey, results)
+        return results
+    }
+
     func ospfView() -> OspfView? {
         guard let simulation else { return nil }
         if let cache = ospfCache, cache.key == topologyKey { return cache.view }

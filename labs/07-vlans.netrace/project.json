@@ -1,0 +1,201 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 10,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 480.0,
+        "y": 200.0
+      }
+    },
+    {
+      "id": 2,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 240.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.10.11",
+        "prefix_len": 24
+      }
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 400.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.20.11",
+        "prefix_len": 24
+      }
+    },
+    {
+      "id": 6,
+      "kind": "pc",
+      "name": "PC3",
+      "position": {
+        "x": 560.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.10.12",
+        "prefix_len": 24
+      }
+    },
+    {
+      "id": 8,
+      "kind": "pc",
+      "name": "PC4",
+      "position": {
+        "x": 720.0,
+        "y": 380.0
+      },
+      "ip": {
+        "address": "192.168.20.12",
+        "prefix_len": 24
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 3,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/3"
+      },
+      "b": {
+        "device": 6,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 9,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/4"
+      },
+      "b": {
+        "device": 8,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "Splitting a switch with VLANs",
+    "topic": "Switching",
+    "brief": "Sales (PC1, PC3) and Staff (PC2, PC4) share SW1. Put them in separate VLANs so each group is its own broadcast domain: VLAN 10 Sales on Fa0/1 and Fa0/3, VLAN 20 Staff on Fa0/2 and Fa0/4.",
+    "tasks": [
+      {
+        "title": "Create VLAN 10 Sales and VLAN 20 Staff",
+        "checks": [
+          {
+            "check": "vlan",
+            "device": "SW1",
+            "vlan": 10,
+            "name": "Sales"
+          },
+          {
+            "check": "vlan",
+            "device": "SW1",
+            "vlan": 20,
+            "name": "Staff"
+          }
+        ],
+        "detail": "`vlan 10`, `name Sales`, then the same for 20."
+      },
+      {
+        "title": "Fa0/1 and Fa0/3 are in VLAN 10",
+        "checks": [
+          {
+            "check": "access_port",
+            "device": "SW1",
+            "port": "Fa0/1",
+            "vlan": 10
+          },
+          {
+            "check": "access_port",
+            "device": "SW1",
+            "port": "Fa0/3",
+            "vlan": 10
+          }
+        ],
+        "detail": "`interface range fa0/1, fa0/3`, `switchport mode access`, `switchport access vlan 10`."
+      },
+      {
+        "title": "Fa0/2 and Fa0/4 are in VLAN 20",
+        "checks": [
+          {
+            "check": "access_port",
+            "device": "SW1",
+            "port": "Fa0/2",
+            "vlan": 20
+          },
+          {
+            "check": "access_port",
+            "device": "SW1",
+            "port": "Fa0/4",
+            "vlan": 20
+          }
+        ]
+      },
+      {
+        "title": "Same VLAN talks, different VLANs don't",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC3"
+          },
+          {
+            "check": "ping",
+            "from": "PC2",
+            "to": "PC4"
+          },
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC2",
+            "succeeds": false
+          }
+        ],
+        "hint": "Different VLANs need a router to talk; that's the router-on-a-stick lab."
+      }
+    ]
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 6,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 480.0,
+        "y": 220.0
+      }
+    },
+    {
+      "id": 2,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 360.0,
+        "y": 400.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 600.0,
+        "y": 400.0
+      },
+      "ip": {
+        "address": "192.168.1.11",
+        "prefix_len": 24
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 4,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "Port security",
+    "topic": "Security",
+    "brief": "Lock SW1 Fa0/1 to the one PC that belongs there: allow a single MAC address, learn it automatically, and shut the port down if anything else is plugged in.",
+    "tasks": [
+      {
+        "title": "Fa0/1 is an access port with port security on",
+        "checks": [
+          {
+            "check": "access_port",
+            "device": "SW1",
+            "port": "Fa0/1",
+            "vlan": 1
+          },
+          {
+            "check": "config",
+            "device": "SW1",
+            "contains": "switchport port-security"
+          }
+        ],
+        "detail": "`interface fa0/1`, `switchport mode access`, `switchport port-security`.",
+        "hint": "Port security only works on access (or trunk) ports, not dynamic ones."
+      },
+      {
+        "title": "It learns the MAC address (sticky)",
+        "checks": [
+          {
+            "check": "config",
+            "device": "SW1",
+            "contains": "switchport port-security mac-address sticky"
+          }
+        ]
+      },
+      {
+        "title": "PC1 still works",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "PC2"
+          }
+        ]
+      }
+    ]
+  }
+}

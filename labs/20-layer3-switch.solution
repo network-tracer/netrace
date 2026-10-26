@@ -1,0 +1,20 @@
+DSW1: enable
+DSW1: configure terminal
+DSW1: vlan 10
+DSW1: vlan 20
+DSW1: exit
+DSW1: interface g1/0/1
+DSW1: switchport mode access
+DSW1: switchport access vlan 10
+DSW1: interface g1/0/2
+DSW1: switchport mode access
+DSW1: switchport access vlan 20
+DSW1: interface vlan 10
+DSW1: ip address 192.168.10.1 255.255.255.0
+DSW1: no shutdown
+DSW1: interface vlan 20
+DSW1: ip address 192.168.20.1 255.255.255.0
+DSW1: no shutdown
+DSW1: exit
+DSW1: ip routing
+DSW1: end

@@ -140,6 +140,9 @@ pub struct Project {
     /// Added after the first format release; absent in older files.
     #[serde(default)]
     annotations: Vec<Annotation>,
+    /// Instructions and checks, when the project is a lab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lab: Option<crate::Lab>,
 }
 
 #[derive(Deserialize)]
@@ -163,7 +166,16 @@ impl Project {
             devices: Vec::new(),
             links: Vec::new(),
             annotations: Vec::new(),
+            lab: None,
         }
+    }
+
+    pub fn lab(&self) -> Option<&crate::Lab> {
+        self.lab.as_ref()
+    }
+
+    pub fn set_lab(&mut self, lab: Option<crate::Lab>) {
+        self.lab = lab;
     }
 
     pub fn from_json(bytes: &[u8]) -> Result<Self, DocError> {

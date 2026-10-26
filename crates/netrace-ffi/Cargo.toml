@@ -23,6 +23,7 @@ bindgen = ["uniffi/cli"]
 netrace-cli.workspace = true
 netrace-doc.workspace = true
 netrace-engine.workspace = true
+netrace-labs.workspace = true
 netrace-sim.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

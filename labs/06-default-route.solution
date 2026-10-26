@@ -1,0 +1,4 @@
+R1: enable
+R1: configure terminal
+R1: ip route 0.0.0.0 0.0.0.0 203.0.113.1
+R1: end

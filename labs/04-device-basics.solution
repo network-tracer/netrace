@@ -1,0 +1,11 @@
+Router: enable
+Router: configure terminal
+Router: hostname HQ
+HQ: enable secret class
+HQ: line console 0
+HQ: password cisco
+HQ: login
+HQ: exit
+HQ: service password-encryption
+HQ: banner motd # Authorised access only #
+HQ: end

@@ -13,6 +13,7 @@ netrace-sim = { path = "crates/netrace-sim" }
 netrace-doc = { path = "crates/netrace-doc" }
 netrace-engine = { path = "crates/netrace-engine" }
 netrace-cli = { path = "crates/netrace-cli" }
+netrace-labs = { path = "crates/netrace-labs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

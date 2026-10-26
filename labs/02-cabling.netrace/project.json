@@ -1,0 +1,116 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 5,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 480.0,
+        "y": 140.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 480.0,
+        "y": 280.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 360.0,
+        "y": 440.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 600.0,
+        "y": 440.0
+      },
+      "ip": {
+        "address": "192.168.1.11",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    }
+  ],
+  "links": [],
+  "annotations": [],
+  "lab": {
+    "title": "Cabling a small office",
+    "topic": "Getting started",
+    "brief": "Everything is configured, but nothing is plugged in. Cable both PCs to the switch and the switch to the router's **Gi0/0**, then check the PCs can reach their gateway.",
+    "tasks": [
+      {
+        "title": "Cable PC1 and PC2 to SW1",
+        "checks": [
+          {
+            "check": "cabled",
+            "a": "PC1",
+            "b": "SW1"
+          },
+          {
+            "check": "cabled",
+            "a": "PC2",
+            "b": "SW1"
+          }
+        ],
+        "hint": "Pick the Connect tool (C), then drag from a PC to the switch. Automatic picks the right cable."
+      },
+      {
+        "title": "Cable SW1 to R1 Gi0/0",
+        "checks": [
+          {
+            "check": "cabled",
+            "a": "SW1",
+            "b": "R1",
+            "b_port": "g0/0"
+          }
+        ],
+        "hint": "Drag from SW1 to R1 and choose GigabitEthernet0/0 when asked for the router's port."
+      },
+      {
+        "title": "PC1 can ping its gateway",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "192.168.1.1"
+          },
+          {
+            "check": "ping",
+            "from": "PC2",
+            "to": "PC1"
+          }
+        ]
+      }
+    ]
+  }
+}

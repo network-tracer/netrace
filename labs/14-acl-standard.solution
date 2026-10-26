@@ -1,0 +1,6 @@
+R1: enable
+R1: configure terminal
+R1: access-list 10 permit host 192.168.1.10
+R1: interface g0/1
+R1: ip access-group 10 out
+R1: end

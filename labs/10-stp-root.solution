@@ -1,0 +1,4 @@
+SW3: enable
+SW3: configure terminal
+SW3: spanning-tree vlan 1 root primary
+SW3: end

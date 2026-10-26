@@ -1,0 +1,14 @@
+SW1: enable
+SW1: configure terminal
+SW1: interface g0/1
+SW1: switchport mode trunk
+SW1: end
+R1: enable
+R1: configure terminal
+R1: interface g0/0.10
+R1: encapsulation dot1Q 10
+R1: ip address 192.168.10.1 255.255.255.0
+R1: interface g0/0.20
+R1: encapsulation dot1Q 20
+R1: ip address 192.168.20.1 255.255.255.0
+R1: end

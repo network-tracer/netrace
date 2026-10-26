@@ -1,0 +1,7 @@
+R1: enable
+R1: configure terminal
+R1: ip dhcp excluded-address 192.168.1.1 192.168.1.10
+R1: ip dhcp pool LAN
+R1: network 192.168.1.0 255.255.255.0
+R1: default-router 192.168.1.1
+R1: end

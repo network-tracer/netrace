@@ -1,0 +1,176 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 8,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 480.0,
+        "y": 160.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            }
+          },
+          "GigabitEthernet0/1": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.2.1",
+              "prefix_len": 24
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 300.0,
+        "y": 300.0
+      }
+    },
+    {
+      "id": 3,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 300.0,
+        "y": 460.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 4,
+      "kind": "router",
+      "name": "DHCP",
+      "position": {
+        "x": 700.0,
+        "y": 300.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "shutdown": false,
+            "address": {
+              "address": "192.168.2.10",
+              "prefix_len": 24
+            }
+          }
+        },
+        "routes": [
+          {
+            "network": "0.0.0.0",
+            "prefix_len": 0,
+            "target": {
+              "next_hop": "192.168.2.1"
+            },
+            "distance": 1
+          }
+        ],
+        "dhcp_pools": [
+          {
+            "name": "LAN1",
+            "network": [
+              "192.168.1.0",
+              24
+            ],
+            "default_router": "192.168.1.1"
+          }
+        ],
+        "dhcp_excluded": [
+          [
+            "192.168.1.1",
+            "192.168.1.10"
+          ]
+        ]
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 5,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 6,
+      "a": {
+        "device": 2,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 3,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 4,
+        "port": "GigabitEthernet0/0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [],
+  "lab": {
+    "title": "Reaching a DHCP server on another network",
+    "topic": "Services",
+    "brief": "A central router called DHCP already has a pool for 192.168.1.0/24, but PC1's Discover is a broadcast, and routers don't forward broadcasts. Make R1 **relay** it with a helper address.",
+    "tasks": [
+      {
+        "title": "R1 Gi0/0 relays DHCP to 192.168.2.10",
+        "checks": [
+          {
+            "check": "config",
+            "device": "R1",
+            "contains": "ip helper-address 192.168.2.10"
+          }
+        ],
+        "detail": "`interface g0/0`, `ip helper-address 192.168.2.10`.",
+        "hint": "The helper goes on the interface facing the clients, where the broadcasts arrive."
+      },
+      {
+        "title": "PC1 gets a lease",
+        "checks": [
+          {
+            "check": "dhcp_lease",
+            "device": "PC1"
+          }
+        ]
+      },
+      {
+        "title": "PC1 can ping the DHCP server",
+        "checks": [
+          {
+            "check": "ping",
+            "from": "PC1",
+            "to": "192.168.2.10"
+          }
+        ]
+      }
+    ]
+  }
+}
