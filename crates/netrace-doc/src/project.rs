@@ -892,6 +892,7 @@ mod tests {
             fill: Some(Swatch::Purple),
             fill_opacity: 0.2,
             line: LinePattern::Solid,
+            label: None,
         };
         let area = p
             .add_annotation(

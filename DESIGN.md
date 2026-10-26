@@ -193,6 +193,16 @@ Meaningful colour:
   VLAN 1 neutral), trunks as a striped band, an amber bar across a port spanning tree blocks, a
   red light on an err-disabled port, a crown on each root bridge, and a legend above the zoom
   control. A cable's own colour, if set, wins over the VLAN tint.
+- **STP view (built):** View → Spanning Tree View (⌥⌘S) or the STP tab of the right pane. The root
+  bridge gets a gold ring and crown; each switch port a role badge (R green, D blue, ✕ red for
+  blocked); interface labels step aside. The pane gives the engine's reason for every role and
+  each switch's path to the root, with a VLAN picker. Right-click a cable → Fail Link replays the
+  reconvergence one change at a time (Play / Step), highlighting the port that changed; the
+  project itself isn't touched, and Restore Link ends the replay.
+- **Snapping:** dragging always snaps to the grid; lining up with other devices and shapes is
+  opt-in (View → Snap to Items), and holding ⌘ flips it for one drag.
+- **Shape labels:** neutral by default (white or near-black over a strong fill, whichever reads),
+  or any palette colour from the inspector or right-click menu.
 - **Feature overlays** (see SCOPE.md, *Configured features are visible*): small badges at
   interfaces (NAT inside/outside, ACL shield, DHCP), VLAN tints, STP blocked-port bars, OSPF area
   outlines. Badges use SF Symbols where they exist, are 12 pt, and never cover a device name.

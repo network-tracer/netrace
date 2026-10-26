@@ -47,7 +47,8 @@ struct AreaView: View {
             }
             AnnotationText(text: annotation.text, placeholder: style.shape.title, isEditing: isEditing, multiline: false,
                            font: Theme.Font.captionMedium,
-                           color: style.stroke?.color ?? Theme.Palette.textSecondary, centered: above, actions: actions)
+                           color: above ? (style.label?.color ?? Theme.Palette.textPrimary) : style.labelColor,
+                           centered: above, actions: actions)
                 .padding(.horizontal, Theme.Spacing.s + 2)
                 .padding(.top, above ? 0 : Theme.Spacing.s)
                 .frame(maxWidth: labelWidth, alignment: above ? .center : .leading)

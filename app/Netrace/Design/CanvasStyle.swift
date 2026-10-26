@@ -173,9 +173,27 @@ extension ShapeStyle {
     /// Border colour, falling back to the neutral default.
     var strokeColor: Color { stroke?.color ?? Theme.Palette.textTertiary }
 
+    /// The label's colour: the user's choice, else neutral. Over a strong
+    /// fill it turns white or near-black, whichever reads on that colour.
+    var labelColor: Color {
+        if let label { return label.color }
+        guard let fill, fillOpacity >= 0.45 else { return Theme.Palette.textPrimary }
+        return fill.prefersDarkText ? Color.black.opacity(0.85) : .white
+    }
+
     /// Fill colour at its opacity. Without a colour, a faint neutral wash.
     var fillColor: Color {
         (fill?.color ?? Theme.Palette.textPrimary).opacity(fill == nil ? min(fillOpacity, 0.6) : fillOpacity)
+    }
+}
+
+extension Swatch {
+    /// Light colours (yellow, green, teal, orange, gray) carry dark text best.
+    var prefersDarkText: Bool {
+        switch self {
+        case .yellow, .green, .teal, .orange, .gray: true
+        case .blue, .red, .pink, .purple: false
+        }
     }
 }
 

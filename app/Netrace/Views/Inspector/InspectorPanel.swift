@@ -780,6 +780,13 @@ private struct AnnotationInspector: View {
                                     setStyle(new, "Change Border Style")
                                 }
                             }
+                            StyleRow("Label") {
+                                SwatchPicker(selection: style.label, defaultHelp: "Automatic: neutral, contrasting with the fill") { color in
+                                    var new = style
+                                    new.label = color
+                                    setStyle(new, "Change Label Colour")
+                                }
+                            }
                             StyleRow("Fill") {
                                 SwatchPicker(selection: style.fill) { color in
                                     var new = style

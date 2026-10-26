@@ -73,6 +73,9 @@ pub struct ShapeStyle {
     /// 0 (no fill) to 1 (opaque). Low values let overlapping shapes blend.
     pub fill_opacity: f64,
     pub line: LinePattern,
+    /// Label colour; `None` picks a neutral one that contrasts with the fill.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<Swatch>,
 }
 
 impl ShapeStyle {
@@ -102,6 +105,7 @@ impl Default for ShapeStyle {
             fill: None,
             fill_opacity: Self::DEFAULT_FILL_OPACITY,
             line: LinePattern::Dashed,
+            label: None,
         }
     }
 }

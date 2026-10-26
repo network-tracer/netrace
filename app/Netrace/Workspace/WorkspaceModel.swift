@@ -112,10 +112,25 @@ final class WorkspaceModel: ObservableObject {
     /// What the right-hand pane shows. The lab lives here so its
     /// instructions stay visible next to the console in the bottom panel.
     enum RightPane: String, CaseIterable, Identifiable {
-        case inspector, lab
+        /// The STP pane also turns on the spanning-tree view of the canvas.
+        case inspector, lab, spanningTree
         var id: Self { self }
-        var title: String { self == .inspector ? "Inspector" : "Lab" }
-        var glyph: Glyph { self == .inspector ? .system("slider.horizontal.3") : .custom(.lab) }
+
+        var title: String {
+            switch self {
+            case .inspector: "Inspector"
+            case .lab: "Lab"
+            case .spanningTree: "STP"
+            }
+        }
+
+        var glyph: Glyph {
+            switch self {
+            case .inspector: .system("slider.horizontal.3")
+            case .lab: .custom(.lab)
+            case .spanningTree: .system("point.3.connected.trianglepath.dotted")
+            }
+        }
     }
 
     /// A cable waiting for the user to confirm its ports.
@@ -176,6 +191,32 @@ final class WorkspaceModel: ObservableObject {
     @Published var showsMinimap = true
     /// VLAN colours, trunks, blocked ports and root bridges on the canvas.
     @Published var showsLayer2 = true
+    /// Dragged items line up with other devices and shapes (off: grid only).
+    @Published var snapsToItems = false
+    /// STP view: which VLAN's tree, and a link failure being replayed.
+    @Published var stpVlan: UInt16 = 1
+    @Published var stpFailedLink: UInt64?
+    @Published var stpStep = 0
+
+    var showsSpanningTree: Bool { showsInspector && rightPane == .spanningTree }
+
+    func showSpanningTree(_ on: Bool) {
+        if on {
+            rightPane = .spanningTree
+            showsInspector = true
+        } else if rightPane == .spanningTree {
+            rightPane = .inspector
+        }
+        stpFailedLink = nil
+        stpStep = 0
+    }
+
+    /// Replays what spanning tree does when this cable fails (the project isn't changed).
+    func failLink(_ id: UInt64) {
+        showSpanningTree(true)
+        stpFailedLink = id
+        stpStep = 0
+    }
     @Published var librarySearch = ""
     @Published var topologySearch = ""
     @Published var hint: String?

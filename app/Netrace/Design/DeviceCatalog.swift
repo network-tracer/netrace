@@ -18,6 +18,8 @@ extension DeviceKind {
         }
     }
 
+    var isSwitch: Bool { self == .l2Switch || self == .l3Switch }
+
     /// Routers and switches: an IOS command line and a configuration.
     var hasCli: Bool {
         switch self {

@@ -35,7 +35,7 @@ pub use probe::{
     SessionKind,
 };
 pub use stack::{Route, RouteSource};
-pub use stp::{BridgeId, Layer2, PortRole, StpBridge, StpPort, VlanTree, bridge_mac};
+pub use stp::{BridgeId, Layer2, PortRole, StpBridge, StpChange, StpPort, VlanTree, bridge_mac};
 pub use trace::{Field, Layer, LayerNote, LayerRole, Outcome, TraceEvent};
 pub use views::{
     ArpRow, InterfaceRow, MacRow, Neighbor, discovery_neighbors, interface_rows, natural_key,

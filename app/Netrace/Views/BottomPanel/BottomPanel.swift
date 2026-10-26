@@ -70,6 +70,7 @@ private struct ConsoleTab: View {
     /// Position while stepping back through history with ↑ / ↓.
     @State private var historyIndex: Int?
     @FocusState private var inputFocused: Bool
+    private static let end = "console-end"
 
     var body: some View {
         let sessions = workspace.consoleSessions.compactMap { document.device($0) }
@@ -124,15 +125,24 @@ private struct ConsoleTab: View {
                 .padding(.vertical, Theme.Spacing.xs + 2)
                 PanelDivider(axis: .horizontal)
 
-                ScrollView {
-                    Text(transcript.text)
-                        .font(Theme.Font.mono)
-                        .foregroundStyle(Theme.Palette.textPrimary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(transcript.text)
+                                .font(Theme.Font.mono)
+                                .foregroundStyle(Theme.Palette.textPrimary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Color.clear.frame(height: 1).id(Self.end)
+                        }
                         .padding(Theme.Spacing.m)
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    // New output always brings the view back to the prompt,
+                    // even if you'd scrolled up to read something.
+                    .onChange(of: transcript.text) { _, _ in proxy.scrollTo(Self.end, anchor: .bottom) }
+                    .onChange(of: active.id) { _, _ in proxy.scrollTo(Self.end, anchor: .bottom) }
                 }
-                .defaultScrollAnchor(.bottom)
                 .background(Theme.Palette.surfaceSunken)
                 .contentShape(Rectangle())
                 .onTapGesture { inputFocused = true }

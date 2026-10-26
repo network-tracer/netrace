@@ -1164,3 +1164,60 @@ fn cdp_finds_cisco_neighbors_and_lldp_waits_for_lldp_run() {
     assert_eq!(crate::discovery_neighbors(&p, r1, true).len(), 1);
     assert!(crate::discovery_neighbors(&p, pc1, false).is_empty());
 }
+
+#[test]
+fn stp_explains_roles_and_reconverges_when_a_link_fails() {
+    let mut p = Project::new();
+    let a = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    let b = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    let first = p
+        .connect(
+            end(a, "FastEthernet0/1"),
+            end(b, "FastEthernet0/1"),
+            Medium::Copper,
+        )
+        .unwrap()
+        .id;
+    p.connect(
+        end(a, "FastEthernet0/2"),
+        end(b, "FastEthernet0/2"),
+        Medium::Copper,
+    )
+    .unwrap();
+    let l2 = crate::Layer2::for_project(&p);
+    let tree = &l2.trees[&1];
+    assert!(tree.bridges[&a].reason.contains("lowest bridge ID"));
+    let blocked = &tree.ports[&(b, "FastEthernet0/2".to_string())];
+    assert!(
+        blocked.reason.contains("Blocked (alternate)"),
+        "{}",
+        blocked.reason
+    );
+    assert!(
+        tree.ports[&(b, "FastEthernet0/1".to_string())]
+            .reason
+            .contains("Root port")
+    );
+
+    let (after, changes) = crate::Layer2::after_link_failure(&p, first, 1);
+    assert_eq!(
+        after.trees[&1].ports[&(b, "FastEthernet0/2".to_string())].role,
+        crate::PortRole::Root
+    );
+    assert!(
+        changes
+            .iter()
+            .any(|c| c.explanation.contains("goes down with the failed link"))
+    );
+    let unblocked = changes
+        .iter()
+        .find(|c| c.port.as_deref() == Some("FastEthernet0/2") && c.device == b)
+        .unwrap();
+    assert!(
+        unblocked
+            .explanation
+            .contains("stops blocking and becomes the root port"),
+        "{}",
+        unblocked.explanation
+    );
+}

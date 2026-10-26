@@ -37,6 +37,8 @@ pub struct ShapeStyle {
     pub fill: Option<Swatch>,
     pub fill_opacity: f64,
     pub line: LinePattern,
+    /// Label colour; none = neutral, contrasting with the fill.
+    pub label: Option<Swatch>,
 }
 
 /// Defaults for a new area: the original neutral, dashed rounded rectangle.
@@ -113,6 +115,7 @@ impl From<ShapeStyle> for doc::ShapeStyle {
             fill: s.fill.map(Into::into),
             fill_opacity: s.fill_opacity,
             line: s.line.into(),
+            label: s.label.map(Into::into),
         }
     }
 }
@@ -125,6 +128,7 @@ impl From<doc::ShapeStyle> for ShapeStyle {
             fill: s.fill.map(Into::into),
             fill_opacity: s.fill_opacity,
             line: s.line.into(),
+            label: s.label.map(Into::into),
         }
     }
 }

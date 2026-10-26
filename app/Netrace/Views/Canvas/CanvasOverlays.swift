@@ -159,7 +159,9 @@ private struct ShapeToolOptions: View {
                     .controlSize(.small)
                 }
             }
-            .padding(.horizontal, Theme.Spacing.xs)
+            // Even inset all round, so a highlighted option sits as far from
+            // the panel's left edge as from its top and bottom.
+            .padding(3)
         }
     }
 }
@@ -408,6 +410,10 @@ struct LinkContextMenu: View {
         Button("Start Capture", image: ImageResource(name: Icon.capture.rawValue, bundle: .main)) {
             workspace.startCapture(on: link.id)
         }
+        Button("Fail Link (Spanning Tree View)", systemImage: "bolt.horizontal.circle") {
+            workspace.failLink(link.id)
+        }
+        .disabled(!(document.device(link.a.deviceId)?.kind.isSwitch ?? false) || !(document.device(link.b.deviceId)?.kind.isSwitch ?? false))
         Button("Link Conditioning…", systemImage: "slider.horizontal.3") {
             workspace.selectLink(link.id)
             workspace.showsInspector = true
@@ -495,6 +501,14 @@ struct AnnotationContextMenu: View {
                     }
                 )) {
                     ForEach(LinePattern.allCases) { Text($0.title).tag($0) }
+                }
+            }
+            Menu("Label", systemImage: "textformat") {
+                SwatchMenuItems(selection: annotation.style.label) { color in
+                    var style = annotation.style
+                    style.label = color
+                    document.setAnnotationStyle(annotation.id, to: style, actionName: "Change Label Colour",
+                                                undoManager: undoManager)
                 }
             }
             Menu("Shape", systemImage: "square.on.circle") {

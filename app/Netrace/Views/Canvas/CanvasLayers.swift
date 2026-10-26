@@ -38,6 +38,8 @@ struct LinksLayer: View {
     let positions: [UInt64: CGPoint]
     /// VLANs, trunks and spanning tree, when the overlay is shown.
     var layer2: Layer2Overlay?
+    /// Port roles in the STP view (replaces the lights).
+    var stp: StpDisplay?
 
     var body: some View {
         Canvas { context, _ in
@@ -53,6 +55,19 @@ struct LinksLayer: View {
                 let length = hypot(b.x - a.x, b.y - a.y)
                 guard length > 1 else { continue }
                 let dir = CGPoint(x: (b.x - a.x) / length, y: (b.y - a.y) / length)
+                if let stp, stp.failedLink == link.id {
+                    // The failed link: faded, struck through in the middle.
+                    var line = Path()
+                    line.move(to: a)
+                    line.addLine(to: b)
+                    context.stroke(line, with: .color(Theme.Palette.statusDown.opacity(0.45)),
+                                   style: StrokeStyle(lineWidth: 1.5, dash: [3, 4]))
+                    let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+                    var bolt = context.resolve(Image(systemName: "bolt.horizontal.circle.fill"))
+                    bolt.shading = .color(Theme.Palette.statusDown)
+                    context.draw(bolt, in: CGRect(x: mid.x - 9, y: mid.y - 9, width: 18, height: 18))
+                    continue
+                }
                 let endA = ports[PortKey(device: link.a.deviceId, port: link.a.port)]
                 let endB = ports[PortKey(device: link.b.deviceId, port: link.b.port)]
                 let trunk = endA?.trunk == true || endB?.trunk == true
@@ -68,6 +83,14 @@ struct LinksLayer: View {
                     // Below the device sits its name label; put the light past it.
                     let offset: CGFloat = dir.y * sign > 0.5 ? 28 : 6
                     let p = CGPoint(x: center.x + dir.x * sign * (edge + offset), y: center.y + dir.y * sign * (edge + offset))
+                    if let stp {
+                        let key = sign > 0 ? PortKey(device: link.a.deviceId, port: link.a.port)
+                                           : PortKey(device: link.b.deviceId, port: link.b.port)
+                        if let role = stp.roles[key] {
+                            Self.drawRole(role, at: p, highlighted: stp.changed.contains(key), in: &context)
+                            continue
+                        }
+                    }
                     if end?.errDisabled == true {
                         Self.drawLight(in: &context, at: p, state: .stopped)
                     } else if end?.blocked == true {
@@ -94,7 +117,7 @@ struct LinksLayer: View {
                 }
 
                 // Semantic zoom: below 70 % the labels would be unreadably small.
-                guard workspace.showsInterfaceLabels, workspace.zoom >= 0.7, length > edgeA + edgeB + 100 else { continue }
+                guard stp == nil, workspace.showsInterfaceLabels, workspace.zoom >= 0.7, length > edgeA + edgeB + 100 else { continue }
                 for (center, edge, sign, port) in [(a, edgeA, 1.0, link.a.port), (b, edgeB, -1.0, link.b.port)] {
                     // Cables leaving downward pass the device's name label; start labels below it.
                     let clearance: CGFloat = dir.y * sign > 0.5 ? 46 : 26
@@ -159,6 +182,20 @@ struct LinksLayer: View {
                 context.stroke(railPath, with: .color(color), style: style)
             }
         }
+    }
+
+    /// STP view: a lettered badge for the port's role (R, D, or a red ✕).
+    static func drawRole(_ role: StpRole, at p: CGPoint, highlighted: Bool, in context: inout GraphicsContext) {
+        let r: CGFloat = highlighted ? 10 : 8.5
+        let circle = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
+        if highlighted {
+            context.fill(Path(ellipseIn: CGRect(x: p.x - r - 4, y: p.y - r - 4, width: (r + 4) * 2, height: (r + 4) * 2)),
+                         with: .color(role.color.opacity(0.3)))
+        }
+        context.fill(circle, with: .color(role.color))
+        context.stroke(circle, with: .color(Theme.Palette.canvas), lineWidth: 1.5)
+        let text = context.resolve(Text(role.letter).font(.system(size: highlighted ? 11 : 9.5, weight: .bold)).foregroundColor(.white))
+        context.draw(text, at: p)
     }
 
     /// Colour of a VLAN on the canvas: a stable palette colour per VLAN.

@@ -152,6 +152,7 @@ struct CanvasView: View {
 
     private var world: some View {
         let positions = displayedPositions
+        let stpRoot = StpDisplay.make(simulation: simulation, workspace: workspace)?.root
         return ZStack(alignment: .topLeading) {
             // Areas sit behind cables and devices.
             ForEach(document.state.annotations.filter { $0.kind == .area }) { area in
@@ -164,7 +165,8 @@ struct CanvasView: View {
             }
 
             LinksLayer(document: document, workspace: workspace, positions: positions,
-                       layer2: workspace.showsLayer2 ? simulation.layer2 : nil)
+                       layer2: workspace.showsLayer2 ? simulation.layer2 : nil,
+                       stp: StpDisplay.make(simulation: simulation, workspace: workspace))
                 .allowsHitTesting(false)
 
             ForEach(document.state.links) { link in
@@ -219,6 +221,7 @@ struct CanvasView: View {
                 NodeView(device: device, workspace: workspace,
                          rootVlans: workspace.showsLayer2
                             ? (simulation.layer2?.roots.filter { $0.deviceId == device.id }.map(\.vlan) ?? []) : [],
+                         isStpRoot: stpRoot == device.id,
                          isSelected: workspace.selection.contains(device.id) || pendingCableSource == device.id
                             || workspace.pduSource == device.id,
                          zoom: workspace.zoom,
@@ -508,6 +511,13 @@ struct CanvasView: View {
 
         var offset = translation
         var guides: [SnapGuide] = []
+        // Snapping to other items is opt-in (View → Snap to Items); holding ⌘
+        // flips it for one drag. The grid always applies.
+        let toItems = workspace.snapsToItems != NSEvent.modifierFlags.contains(.command)
+        if !toItems {
+            targetsX = []
+            targetsY = []
+        }
         if let x = best(anchorsX, targetsX, translation.width) {
             offset.width += x.shift
             guides.append(SnapGuide(vertical: true, position: x.line))
@@ -993,6 +1003,8 @@ private struct NodeView: View {
     @ObservedObject var workspace: WorkspaceModel
     /// VLANs this switch is the spanning-tree root for.
     var rootVlans: [UInt16] = []
+    /// The root bridge in the STP view: highlighted with a ring.
+    var isStpRoot = false
     let isSelected: Bool
     let zoom: CGFloat
     /// Returns false if the name was rejected, keeping the field open.
@@ -1008,6 +1020,14 @@ private struct NodeView: View {
     var body: some View {
         let power = workspace.powerState(device.id)
         DeviceSymbolView(kind: device.kind, isSelected: isSelected, isDimmed: power == .stopped, tint: device.color)
+            .background {
+                if isStpRoot {
+                    Circle()
+                        .fill(Theme.Palette.statusWarning.opacity(0.18))
+                        .overlay(Circle().strokeBorder(Theme.Palette.statusWarning, lineWidth: 2))
+                        .frame(width: 64, height: 64)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 if !rootVlans.isEmpty {
                     Image(systemName: "crown.fill")

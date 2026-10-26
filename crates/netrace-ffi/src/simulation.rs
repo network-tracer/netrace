@@ -423,3 +423,136 @@ impl Simulation {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum StpRole {
+    Root,
+    Designated,
+    Alternate,
+    Backup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StpPortInfo {
+    pub device_id: u64,
+    pub port: String,
+    pub role: StpRole,
+    pub cost: u32,
+    pub forwarding: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StpBridgeInfo {
+    pub device_id: u64,
+    /// "32769 / 02:4e:…".
+    pub bridge_id: String,
+    pub root_cost: u32,
+    pub root_port: Option<String>,
+    pub is_root: bool,
+    pub reason: String,
+}
+
+/// One VLAN's spanning tree, for the STP view.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StpView {
+    pub vlan: u16,
+    /// Every VLAN with a tree, for the VLAN picker.
+    pub vlans: Vec<u16>,
+    pub bridges: Vec<StpBridgeInfo>,
+    pub ports: Vec<StpPortInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StpChangeInfo {
+    pub device_id: u64,
+    pub port: Option<String>,
+    pub before: Option<StpRole>,
+    pub after: Option<StpRole>,
+    pub explanation: String,
+}
+
+/// The tree after a link fails, and the steps that got it there.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StpFailure {
+    pub after: StpView,
+    pub changes: Vec<StpChangeInfo>,
+}
+
+fn role(r: engine::PortRole) -> StpRole {
+    match r {
+        engine::PortRole::Root => StpRole::Root,
+        engine::PortRole::Designated => StpRole::Designated,
+        engine::PortRole::Alternate => StpRole::Alternate,
+        engine::PortRole::Backup => StpRole::Backup,
+    }
+}
+
+fn stp_view(l2: &engine::Layer2, vlan: u16) -> StpView {
+    let vlans = l2.trees.keys().copied().collect();
+    let Some(tree) = l2.trees.get(&vlan) else {
+        return StpView {
+            vlan,
+            vlans,
+            bridges: Vec::new(),
+            ports: Vec::new(),
+        };
+    };
+    StpView {
+        vlan,
+        vlans,
+        bridges: tree
+            .bridges
+            .iter()
+            .map(|(id, b)| StpBridgeInfo {
+                device_id: id.0,
+                bridge_id: b.id.to_string(),
+                root_cost: b.root_cost,
+                root_port: b.root_port.clone(),
+                is_root: *id == tree.root_device,
+                reason: b.reason.clone(),
+            })
+            .collect(),
+        ports: tree
+            .ports
+            .iter()
+            .map(|((id, port), p)| StpPortInfo {
+                device_id: id.0,
+                port: port.clone(),
+                role: role(p.role),
+                cost: p.cost,
+                forwarding: p.role.forwards(),
+                reason: p.reason.clone(),
+            })
+            .collect(),
+    }
+}
+
+#[uniffi::export]
+impl Simulation {
+    /// The spanning tree of one VLAN, with the reason for every role.
+    pub fn stp_view(&self, vlan: u16) -> StpView {
+        stp_view(self.lock().layer2(), vlan)
+    }
+
+    /// What the tree of `vlan` becomes if `link_id` fails (the project
+    /// itself isn't changed).
+    pub fn stp_link_failure(&self, link_id: u64, vlan: u16) -> StpFailure {
+        let network = self.lock();
+        let (after, changes) =
+            engine::Layer2::after_link_failure(network.project(), doc::LinkId(link_id), vlan);
+        StpFailure {
+            after: stp_view(&after, vlan),
+            changes: changes
+                .into_iter()
+                .map(|c| StpChangeInfo {
+                    device_id: c.device.0,
+                    port: c.port,
+                    before: c.before.map(role),
+                    after: c.after.map(role),
+                    explanation: c.explanation,
+                })
+                .collect(),
+        }
+    }
+}

@@ -178,6 +178,14 @@ final class SimulationController: ObservableObject {
         }
     }
 
+    func stpView(vlan: UInt16) -> StpView? {
+        simulation?.stpView(vlan: vlan)
+    }
+
+    func stpLinkFailure(link: UInt64, vlan: UInt16) -> StpFailure? {
+        simulation?.stpLinkFailure(linkId: link, vlan: vlan)
+    }
+
     func macAddress(of device: UInt64, port: String) -> String? {
         simulation?.macAddress(device: device, port: port)
     }

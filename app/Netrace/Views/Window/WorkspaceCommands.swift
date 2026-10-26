@@ -39,6 +39,16 @@ struct WorkspaceCommands: Commands {
             .keyboardShortcut("l", modifiers: [.command, .shift])
             Button(workspace?.showsGrid == false ? "Show Grid" : "Hide Grid") { workspace?.showsGrid.toggle() }
             Button(workspace?.showsMinimap == false ? "Show Minimap" : "Hide Minimap") { workspace?.showsMinimap.toggle() }
+            Toggle("Spanning Tree View", isOn: Binding(
+                get: { workspace?.showsSpanningTree ?? false },
+                set: { workspace?.showSpanningTree($0) }
+            ))
+            .keyboardShortcut("s", modifiers: [.command, .option])
+            Toggle("Snap to Items", isOn: Binding(
+                get: { workspace?.snapsToItems ?? false },
+                set: { workspace?.snapsToItems = $0 }
+            ))
+            .help("Line up with other devices and shapes while dragging; hold ⌘ to switch it for one drag")
             Button(workspace?.showsLayer2 == false ? "Show VLANs and Spanning Tree" : "Hide VLANs and Spanning Tree") {
                 workspace?.showsLayer2.toggle()
             }

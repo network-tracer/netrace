@@ -15,7 +15,7 @@ use netrace_doc::{DeviceId, DeviceKind, Project, SwitchportConfig};
 use crate::MacAddr;
 use crate::stack::PortStates;
 
-pub(crate) type PortKey = (DeviceId, String);
+pub type PortKey = (DeviceId, String);
 
 /// MAC index used for a switch's bridge ID.
 const BRIDGE_MAC_INDEX: usize = 0xfe;
@@ -110,6 +110,8 @@ pub struct StpPort {
     pub number: u32,
     /// The bridge whose port is designated on this port's segment.
     pub designated_bridge: BridgeId,
+    /// Why the port has its role, in plain words, from the decision made.
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +119,8 @@ pub struct StpBridge {
     pub id: BridgeId,
     pub root_cost: u32,
     pub root_port: Option<String>,
+    /// Why this bridge is (or isn't) the root.
+    pub reason: String,
 }
 
 /// Spanning tree for one VLAN.
@@ -378,12 +382,35 @@ fn compute(
                     .map(|(_, port)| port)
             })
             .flatten();
+        let name = |id: DeviceId| {
+            project
+                .device(id)
+                .map(|d| d.name.clone())
+                .unwrap_or_default()
+        };
+        let reason = if bridge == root_device {
+            format!(
+                "{} has the lowest bridge ID (priority {}, MAC {}), so every switch elects it root.",
+                name(bridge),
+                root.priority,
+                root.mac
+            )
+        } else {
+            format!(
+                "{} isn't root: {} has the lower bridge ID ({} beats {}). Its cheapest path to the root costs {root_cost}.",
+                name(bridge),
+                name(root_device),
+                root,
+                bridge_ids[&bridge]
+            )
+        };
         tree.bridges.insert(
             bridge,
             StpBridge {
                 id: bridge_ids[&bridge],
                 root_cost,
                 root_port: root_port.clone(),
+                reason,
             },
         );
         for (port, n) in bridge_ports {
@@ -398,6 +425,38 @@ fn compute(
             } else {
                 PortRole::Alternate
             };
+            let p = crate::abbreviate_port(port);
+            let other = name(designated.0);
+            let reason = match role {
+                PortRole::Root => format!(
+                    "Root port: {p} is {}'s cheapest way to the root, total cost {root_cost} (this link costs {}).",
+                    name(bridge),
+                    port_cost(port)
+                ),
+                PortRole::Designated if bridge == root_device => {
+                    format!(
+                        "Designated: every port of the root bridge forwards, so {p} is designated for its link."
+                    )
+                }
+                PortRole::Designated => format!(
+                    "Designated: on this link {} offers the best path to the root (cost {root_cost}), so {p} forwards \
+                     towards the switches and hosts beyond it.",
+                    name(bridge)
+                ),
+                PortRole::Alternate => format!(
+                    "Blocked (alternate): {other} offers this link a better path to the root (cost {} against {}'s \
+                     {root_cost}), and {p} isn't {}'s root port. Forwarding here too would make a loop, so it \
+                     blocks and waits in reserve.",
+                    cost.get(&designated.0).copied().unwrap_or(0),
+                    name(bridge),
+                    name(bridge)
+                ),
+                PortRole::Backup => format!(
+                    "Blocked (backup): {} has another port on the same segment (through a hub) that is already \
+                     designated, so {p} blocks.",
+                    name(bridge)
+                ),
+            };
             tree.ports.insert(
                 key,
                 StpPort {
@@ -405,9 +464,117 @@ fn compute(
                     cost: port_cost(port),
                     number: *n,
                     designated_bridge: bridge_ids[&designated.0],
+                    reason,
                 },
             );
         }
     }
     Some(tree)
+}
+
+/// One port or bridge whose spanning-tree state changed when a link failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StpChange {
+    pub device: DeviceId,
+    /// `None` for a change of root bridge.
+    pub port: Option<String>,
+    pub before: Option<PortRole>,
+    pub after: Option<PortRole>,
+    pub explanation: String,
+}
+
+impl Layer2 {
+    /// What happens to the spanning tree of `vlan` when `link` fails: the
+    /// tree recomputed without it, and the changes in the order they matter
+    /// (root first, then lost links, then ports that unblock or change role).
+    pub fn after_link_failure(
+        project: &Project,
+        link: netrace_doc::LinkId,
+        vlan: u16,
+    ) -> (Layer2, Vec<StpChange>) {
+        let before = Layer2::for_project(project);
+        let mut failed = project.clone();
+        let _ = failed.disconnect(link);
+        let after = Layer2::for_project(&failed);
+        let name = |id: DeviceId| {
+            project
+                .device(id)
+                .map(|d| d.name.clone())
+                .unwrap_or_default()
+        };
+        let mut changes = Vec::new();
+        let (old, new) = (before.trees.get(&vlan), after.trees.get(&vlan));
+        if let (Some(o), Some(n)) = (old, new)
+            && o.root_device != n.root_device
+        {
+            changes.push(StpChange {
+                device: n.root_device,
+                port: None,
+                before: None,
+                after: None,
+                explanation: format!(
+                    "The switches lose contact with {} and elect a new root: {} now has the lowest bridge ID they can reach.",
+                    name(o.root_device),
+                    name(n.root_device)
+                ),
+            });
+        }
+        let empty = BTreeMap::new();
+        let old_ports = old.map(|t| &t.ports).unwrap_or(&empty);
+        let new_ports = new.map(|t| &t.ports).unwrap_or(&empty);
+        let mut keys: Vec<&PortKey> = old_ports.keys().chain(new_ports.keys()).collect();
+        keys.sort();
+        keys.dedup();
+        let mut lost = Vec::new();
+        let mut moved = Vec::new();
+        for key in keys {
+            let (b, a) = (
+                old_ports.get(key).map(|p| p.role),
+                new_ports.get(key).map(|p| p.role),
+            );
+            if b == a {
+                continue;
+            }
+            let p = crate::abbreviate_port(&key.1);
+            let who = name(key.0);
+            let change = match (b, a) {
+                (Some(_), None) => StpChange {
+                    device: key.0,
+                    port: Some(key.1.clone()),
+                    before: b,
+                    after: None,
+                    explanation: format!("{who} {p} goes down with the failed link."),
+                },
+                (_, Some(role)) => StpChange {
+                    device: key.0,
+                    port: Some(key.1.clone()),
+                    before: b,
+                    after: Some(role),
+                    explanation: match (b, role) {
+                        (Some(PortRole::Alternate | PortRole::Backup), PortRole::Root) => format!(
+                            "{who} {p} stops blocking and becomes the root port: it's now {who}'s best remaining path to the root."
+                        ),
+                        (Some(PortRole::Alternate | PortRole::Backup), PortRole::Designated) => {
+                            format!(
+                                "{who} {p} stops blocking and becomes designated: nothing else serves that link now."
+                            )
+                        }
+                        (_, PortRole::Alternate | PortRole::Backup) => {
+                            format!("{who} {p} now blocks: {}", new_ports[key].reason)
+                        }
+                        _ => format!("{who} {p}: {}", new_ports[key].reason),
+                    },
+                },
+                (None, None) => continue,
+            };
+            if change.after.is_none() {
+                lost.push(change)
+            } else {
+                moved.push(change)
+            }
+        }
+        changes.extend(lost);
+        changes.extend(moved);
+        (after, changes)
+    }
 }

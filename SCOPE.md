@@ -85,6 +85,45 @@ it acts on a packet in Simulation mode. Markers can be switched off per feature 
 | OSPF | Areas outlined (from the config) and neighbour adjacencies drawn as a thin overlay | Hellos and LSAs animate; DR / BDR marked |
 | Routing | Hover a router to see its routes highlighted as paths on the diagram | The route that matched is named in the hop explanation |
 
+## Visualisations come from the engine
+
+The rule for every visualisation: it is drawn from what the engine actually did (trace events,
+the computed spanning tree, routing tables, ACL matches, NAT tables, OSPF state), never from a
+separate model of what the UI expects to happen. If the engine is wrong the picture is wrong
+too, so the visualiser doubles as a debugging tool, and what it teaches is what the simulation
+really does. Each engine decision carries the reason it was made (the route, the ACL line, the
+STP role), and the UI only presents it.
+
+| Topic | What the student sees | Comes from | Milestone |
+|---|---|---|---|
+| VLANs | Which ports a frame may leave by, and why the others are skipped (other VLAN, not allowed on the trunk, VLAN missing); tag added or removed at trunks | Switch forwarding decision per frame | M4 ✅ (trace), M5.5 (view) |
+| STP | An STP view: root bridge highlighted, root / designated ports marked, blocked ports in red, each port's reason ("lower path cost to root via Gi0/1", "SW2 has the lower bridge ID on this segment"); break a link and watch the tree reconverge step by step | Spanning-tree computation, recomputed on topology change, with its tie-break decisions recorded | M5.5 |
+| DHCP | Discover → Offer → Request → Acknowledge stepped through, with the lease appearing on the PC and in the server's binding table; relay hops shown | DHCP client / server / relay events | M5 |
+| ACLs | A packet reaching R1 Gi0/1 *in*, the ACL evaluated line by line, "matched line 10: deny ip host 10.0.0.5 any → dropped" (or the implicit deny at the end); a shield badge where each ACL is applied | ACL evaluation result attached to the trace event | M5 |
+| NAT / PAT | The packet's source address and port rewritten at the router, before and after side by side; the translation table entry it created or used; inside / outside badges | NAT translation event and table | M5 |
+| OSPF | Neighbour states (Down → Init → 2-Way → Full), DR / BDR election, the link-state database per router, SPF result and why a route won; a link failure propagating as LSAs and routes changing | OSPF adjacency, LSDB and SPF events | M5 |
+
+The STP view is the template: a mode that overlays one protocol's real state on the topology,
+lets the user break things (shut a port, pull a cable), and replays how the protocol reacts.
+
+## Compatibility with Cisco IOS and Packet Tracer
+
+netrace's command line is *IOS-style*: familiar prompts, modes, abbreviations and output, written
+from Cisco documentation and lab transcripts. It is not verified against real IOS or Packet Tracer
+yet, so compatibility is a claim to test, command by command:
+
+- **Compatibility matrix** ([COMPATIBILITY.md](COMPATIBILITY.md)): every command and `show` output,
+  its status (implemented, verified against IOS 15.x, verified against Packet Tracer, differs on
+  purpose), and the reference it was checked against.
+- **Golden transcripts:** sessions captured from real IOS (lab equipment or CML) and Packet Tracer,
+  replayed through netrace in tests; differences are either fixed or written down as deliberate.
+- **Behaviour tests,** not just output: the same lab configuration should give the same
+  reachability, the same spanning-tree roles and the same routing tables in all three.
+- **Deliberate differences stay visible:** no DTP, converged STP without timers, simulated
+  platforms. Where netrace differs, the console says so (as it does for `switchport mode dynamic desirable`).
+- **Import later:** reading a running-config text into a device is the first step towards
+  moving labs in from real gear; `.pkt` import stays out of scope.
+
 ## Command line and routing (built in M3)
 
 - **Engine:** one IP stack shared by end devices, routers and a switch's `interface Vlan1`:
@@ -148,8 +187,9 @@ Built in M2.5 (file format 2; format 1 files still open):
 - **Shapes:** rounded rectangle, rectangle, ellipse and regular polygons with 3–12 sides, each
   with a border colour and style (solid, dashed, dotted), a fill colour and fill opacity.
 - **How shapes interact:** shapes sit behind cables and devices, in a z-order you can change
-  (bring to front / forward, send backward / to back); dragging snaps to other devices' centres
-  and shapes' edges and centres, with guide lines, and otherwise to the grid; devices whose
+  (bring to front / forward, send backward / to back); dragging snaps to the grid, and only
+  when asked (View → Snap to Items, or ⌘ while dragging) to other devices' centres and shapes'
+  edges and centres, with guide lines; devices whose
   centre is inside a shape move with it, and so do shapes and notes inside it (nesting works);
   overlapping fills blend, never hide devices; group / ungroup (⌥⌘G) makes devices, shapes and
   notes select and move together; lock (⌘L) stops a shape or note moving or resizing.
@@ -286,6 +326,7 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | M3 ✅ | CLI + routing | IOS parser, router interfaces, static routes, traceroute, subinterfaces, SVIs; multi-line paste, config snippets, configs saved in the file, duplicate with variations. Subinterfaces and SVIs other than Vlan1 are configured and saved now and carry traffic once trunks arrive (M4) |
 | M4 ✅ | Switching | VLANs, trunks, STP, CDP/LLDP, port security; VLAN tinting and STP markers on the canvas; router-on-a-stick and SVI routing |
 | M5 | Services | DHCP, ACLs, NAT/PAT, OSPF, each with its canvas markers and visualiser effects |
+| M5.5 | Protocol views | STP view ✅ (built ahead of M5) (roles, reasons, blocked ports, reconvergence when a link fails); the same pattern reused for DHCP, ACL, NAT and OSPF as each lands |
 | M6 | Labs + polish | Lab engine, 20 labs, performance pass, beta |
 
 ## Quality targets
