@@ -8,22 +8,48 @@ import SwiftUI
 /// with radii in points relative to the frame height so curves stay round
 /// at any aspect ratio.
 enum DeviceSymbol {
-    /// Natural size on the canvas at 100 % zoom.
+    /// Natural size on the canvas at 100 % zoom: the artwork's own
+    /// proportions (design/Icons) at about 1.1 pt per source unit.
     static func size(for kind: DeviceKind) -> CGSize {
         switch kind {
-        case .router: CGSize(width: 46, height: 46)
-        case .l2Switch: CGSize(width: 68, height: 30)
-        case .l3Switch: CGSize(width: 68, height: 40)
-        case .hub: CGSize(width: 58, height: 26)
-        case .firewall: CGSize(width: 50, height: 40)
+        case .router: CGSize(width: 65, height: 44)
+        case .l2Switch: CGSize(width: 84, height: 43)
+        case .l3Switch: CGSize(width: 54, height: 54)
+        case .hub: CGSize(width: 75, height: 39)
+        case .firewall: CGSize(width: 27, height: 58)
         case .accessPoint: CGSize(width: 44, height: 44)
-        case .cloud: CGSize(width: 70, height: 44)
-        case .pc: CGSize(width: 50, height: 44)
-        case .laptop: CGSize(width: 60, height: 40)
-        case .server: CGSize(width: 38, height: 50)
-        case .printer: CGSize(width: 50, height: 42)
-        case .ipPhone: CGSize(width: 52, height: 42)
+        case .cloud: CGSize(width: 77, height: 48)
+        case .pc: CGSize(width: 65, height: 58)
+        case .laptop: CGSize(width: 73, height: 55)
+        case .server: CGSize(width: 38, height: 49)
+        case .printer: CGSize(width: 76, height: 30)
+        case .ipPhone: CGSize(width: 54, height: 40)
         case .smartphone: CGSize(width: 28, height: 48)
+        }
+    }
+
+    /// Whether the kind has supplied artwork (the Devices asset catalog);
+    /// the rest are still drawn from paths.
+    static func hasArtwork(_ kind: DeviceKind) -> Bool {
+        kind != .accessPoint && kind != .smartphone
+    }
+
+    /// Asset-catalog name of the kind's artwork layers: `<name>.fill` and `<name>.line`.
+    static func artworkName(_ kind: DeviceKind) -> String {
+        switch kind {
+        case .router: "router"
+        case .l2Switch: "l2Switch"
+        case .l3Switch: "l3Switch"
+        case .hub: "hub"
+        case .firewall: "firewall"
+        case .cloud: "cloud"
+        case .pc: "pc"
+        case .laptop: "laptop"
+        case .server: "server"
+        case .printer: "printer"
+        case .ipPhone: "ipPhone"
+        case .accessPoint: "accessPoint"
+        case .smartphone: "smartphone"
         }
     }
 
@@ -257,9 +283,39 @@ struct DeviceSymbolView: View {
 
     var body: some View {
         let size = DeviceSymbol.size(for: kind)
-        let line = max(1, 1.5 * min(1, scale + 0.25))
-        // Solid style, like SF Symbols' filled variants: the silhouette is
-        // filled with the ink colour and interior detail is knocked out of it.
+        Group {
+            if DeviceSymbol.hasArtwork(kind) {
+                artwork
+            } else {
+                drawn(line: max(1, 1.5 * min(1, scale + 0.25)))
+            }
+        }
+        .frame(width: size.width * scale, height: size.height * scale)
+        .opacity(isDimmed ? 0.4 : 1)
+        .background {
+            ZStack {
+                if isRoot { highlight(Theme.Palette.root, halo: true) }
+                if isSelected { highlight(Theme.Palette.accent, halo: false) }
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    /// The supplied artwork: the body layer in the device's colour (light,
+    /// soft blue in dark mode, or its own tint) under the linework layer.
+    private var artwork: some View {
+        let name = DeviceSymbol.artworkName(kind)
+        return ZStack {
+            Image("\(name).fill").resizable().renderingMode(.template)
+                .foregroundStyle(tint?.color ?? Theme.Palette.deviceFill)
+            Image("\(name).line").resizable().renderingMode(.template)
+                .foregroundStyle(Theme.Palette.deviceLine)
+        }
+        .aspectRatio(contentMode: .fit)
+    }
+
+    /// Devices without artwork: a solid silhouette with its detail knocked out.
+    private func drawn(line: CGFloat) -> some View {
         ZStack {
             DeviceOutlineShape(kind: kind).fill(tint?.color ?? Theme.Palette.symbolInk)
             DeviceFaintShape(kind: kind).fill(Theme.Palette.symbolKnockout.opacity(0.22))
@@ -267,26 +323,15 @@ struct DeviceSymbolView: View {
                 .stroke(Theme.Palette.symbolKnockout, style: StrokeStyle(lineWidth: line, lineCap: .round, lineJoin: .round))
             DeviceSolidsShape(kind: kind).fill(Theme.Palette.symbolKnockout)
         }
-        .frame(width: size.width * scale, height: size.height * scale)
-        .opacity(isDimmed ? 0.4 : 1)
-        .background {
-            ZStack {
-                if isRoot {
-                    // Halo first, then the solid band; selection's band (blue)
-                    // covers the gold one, so a selected root keeps its halo.
-                    DeviceOutlineShape(kind: kind)
-                        .stroke(Theme.Palette.root.opacity(0.28), style: StrokeStyle(lineWidth: 16, lineJoin: .round))
-                    DeviceOutlineShape(kind: kind)
-                        .stroke(Theme.Palette.root, style: StrokeStyle(lineWidth: 8, lineJoin: .round))
-                }
-                if isSelected {
-                    // A solid band hugging the silhouette with no gap: a stroke
-                    // centred on the outline, whose inner half the symbol covers.
-                    DeviceOutlineShape(kind: kind)
-                        .stroke(Theme.Palette.accent, style: StrokeStyle(lineWidth: 8, lineJoin: .round))
-                }
-            }
+    }
+
+    /// A rounded tile behind the symbol for selection and the STP root.
+    private func highlight(_ colour: Color, halo: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        return ZStack {
+            if halo { shape.fill(colour.opacity(0.18)).padding(-10) }
+            shape.fill(colour.opacity(0.22)).padding(-5)
+            shape.strokeBorder(colour, lineWidth: 2).padding(-5)
         }
-        .contentShape(DeviceOutlineShape(kind: kind))
     }
 }

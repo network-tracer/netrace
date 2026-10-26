@@ -26,6 +26,10 @@ enum Theme {
         /// Device silhouettes are solid ink with detail knocked out in the canvas colour.
         static let symbolInk = Color(light: 0x3A3A3C, dark: 0xD9D9D9)
         static let symbolKnockout = Color(light: 0xF0F0F0, dark: 0x161616)
+        /// Device artwork: a bright blue body with white linework in both
+        /// appearances (a touch lighter in dark mode to hold its own on the canvas).
+        static let deviceFill = Color(light: 0x3A86E6, dark: 0x468FEF)
+        static let deviceLine = Color.white
         /// ≥ 3:1 against the canvas, as a meaningful graphic.
         static let link = Color(light: 0x7A7A7A, dark: 0x7A7A7A)
 
