@@ -1,0 +1,28 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 30,
+  "devices": [
+    { "id": 1, "kind": "router", "name": "R1", "position": { "x": 600.0, "y": 168.0 },
+      "config": { "interfaces": {
+        "GigabitEthernet0/0": { "address": { "address": "192.168.1.1", "prefix_len": 24 }, "shutdown": false },
+        "GigabitEthernet0/1": { "address": { "address": "192.168.2.1", "prefix_len": 24 }, "shutdown": false } } } },
+    { "id": 2, "kind": "l2_switch", "name": "SW1", "position": { "x": 432.0, "y": 312.0 } },
+    { "id": 3, "kind": "l2_switch", "name": "SW2", "position": { "x": 768.0, "y": 312.0 } },
+    { "id": 4, "kind": "pc", "name": "PC1", "position": { "x": 336.0, "y": 456.0 }, "dhcp": true },
+    { "id": 5, "kind": "pc", "name": "PC2", "position": { "x": 528.0, "y": 456.0 }, "dhcp": true },
+    { "id": 6, "kind": "server", "name": "SRV1", "position": { "x": 768.0, "y": 456.0 },
+      "ip": { "address": "192.168.2.10", "prefix_len": 24, "gateway": "192.168.2.1" } }
+  ],
+  "links": [
+    { "id": 7, "a": { "device": 1, "port": "GigabitEthernet0/0" }, "b": { "device": 2, "port": "GigabitEthernet0/1" }, "medium": "copper" },
+    { "id": 8, "a": { "device": 1, "port": "GigabitEthernet0/1" }, "b": { "device": 3, "port": "GigabitEthernet0/1" }, "medium": "copper" },
+    { "id": 9, "a": { "device": 2, "port": "FastEthernet0/1" }, "b": { "device": 4, "port": "FastEthernet0" }, "medium": "copper" },
+    { "id": 10, "a": { "device": 2, "port": "FastEthernet0/2" }, "b": { "device": 5, "port": "FastEthernet0" }, "medium": "copper" },
+    { "id": 11, "a": { "device": 3, "port": "GigabitEthernet0/2" }, "b": { "device": 6, "port": "GigabitEthernet0" }, "medium": "copper" }
+  ],
+  "annotations": [
+    { "id": 12, "kind": "note", "rect": { "x": 24.0, "y": 48.0, "width": 336.0, "height": 156.0 },
+      "text": "Services lab. PC1 and PC2 use DHCP but get 169.254 addresses: there's no server yet. 1) On R1 add a DHCP pool for 192.168.1.0/24 (exclude .1-.10), then run ipconfig /renew on a PC. 2) Allow PC1 but stop PC2 from pinging SRV1 with an extended ACL on R1, and watch the Events tab name the line that drops it." }
+  ]
+}

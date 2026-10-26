@@ -291,6 +291,7 @@ impl Project {
         let settings = doc::DeviceSettings {
             name,
             ip: target.ip,
+            dhcp: target.dhcp,
             config,
             startup: target.startup.clone(),
         };

@@ -49,7 +49,7 @@ struct WorkspaceCommands: Commands {
                 set: { workspace?.snapsToItems = $0 }
             ))
             .help("Line up with other devices and shapes while dragging; hold ⌘ to switch it for one drag")
-            Button(workspace?.showsLayer2 == false ? "Show VLANs and Spanning Tree" : "Hide VLANs and Spanning Tree") {
+            Button(workspace?.showsLayer2 == false ? "Show Feature Overlays" : "Hide Feature Overlays") {
                 workspace?.showsLayer2.toggle()
             }
             .keyboardShortcut("v", modifiers: [.command, .option])

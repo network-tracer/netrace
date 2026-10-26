@@ -1,5 +1,6 @@
 //! Read-only views for `show` commands.
 
+use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use netrace_doc::{DeviceId, Project};
@@ -260,6 +261,15 @@ impl Network {
             self.secure.get(&key).cloned().unwrap_or_default(),
             self.violations.get(&key).copied().unwrap_or(0),
         )
+    }
+
+    /// How often each ACL line has matched, by (list, sequence).
+    pub fn acl_hits(&self, id: DeviceId) -> BTreeMap<(String, u32), u32> {
+        self.acl_hits
+            .iter()
+            .filter(|((d, _, _), _)| *d == id)
+            .map(|((_, acl, seq), n)| ((acl.clone(), *seq), *n))
+            .collect()
     }
 
     /// VLAN membership and spanning tree as the simulation uses them.

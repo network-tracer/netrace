@@ -170,6 +170,7 @@ impl PingSession {
                 let what = match code {
                     Unreachable::Network => "net",
                     Unreachable::Host => "host",
+                    Unreachable::Prohibited => "prohibited",
                 };
                 self.failures.insert(
                     seq,

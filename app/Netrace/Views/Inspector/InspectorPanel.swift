@@ -353,8 +353,60 @@ private struct HostIPEditor: View {
     @State private var mask = ""
     @State private var gateway = ""
 
+    @EnvironmentObject private var simulation: SimulationController
+
     var body: some View {
         InspectorSection("IP Configuration") {
+            Picker("Address", selection: Binding(
+                get: { device.dhcp },
+                set: { dhcp in
+                    if case .failure(let error) = document.setHostDHCP(device.id, dhcp, undoManager: undoManager) {
+                        workspace.flash(error.message)
+                    }
+                }
+            )) {
+                Text("Static").tag(false)
+                Text("DHCP").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            if device.dhcp {
+                dhcpStatus
+            } else {
+                staticFields
+            }
+        }
+        .onAppear(perform: load)
+        .onChange(of: device.ip) { _, _ in load() }
+        .onChange(of: device.id) { _, _ in load() }
+    }
+
+    /// What DHCP gave the device in the simulation (or why it didn't).
+    @ViewBuilder
+    private var dhcpStatus: some View {
+        if let current = simulation.currentAddress(of: device.id) {
+            KeyValueRow(current.apipa ? "APIPA address" : "Leased address", "\(current.address)/\(current.prefixLen)", mono: true)
+            KeyValueRow("Default gateway", current.gateway ?? "none", mono: true)
+            if let server = current.dhcpServer {
+                KeyValueRow("DHCP server", server, mono: true)
+            }
+            if current.apipa {
+                Text("No DHCP server answered, so it gave itself a 169.254 address. Add an ip dhcp pool for this network, or an ip helper-address on the router.")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            Text("Asks a DHCP server for its address when the simulation starts. Watch the exchange in the Events tab.")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var staticFields: some View {
             field("IPv4 address", text: $address, prompt: "192.168.1.10")
             field("Subnet mask", text: $mask, prompt: "255.255.255.0")
             field("Default gateway", text: $gateway, prompt: "Optional")
@@ -372,10 +424,6 @@ private struct HostIPEditor: View {
                 }
             }
             .controlSize(.small)
-        }
-        .onAppear(perform: load)
-        .onChange(of: device.ip) { _, _ in load() }
-        .onChange(of: device.id) { _, _ in load() }
     }
 
     private func field(_ label: String, text: Binding<String>, prompt: String) -> some View {
@@ -454,6 +502,10 @@ private struct PacketInspector: View {
                         .foregroundStyle(Theme.Palette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+
+                    if let acl = event.acl {
+                        AclDecisionView(decision: acl)
+                    }
 
                     if !event.layers.isEmpty {
                         InspectorSection("Layers at \(device?.name ?? "this device")") {
@@ -1062,5 +1114,47 @@ private struct ProjectInspector: View {
             Spacer()
             Text(date).font(Theme.Font.caption).foregroundStyle(Theme.Palette.textTertiary)
         }
+    }
+}
+
+/// The access list a router checked at this hop, every line shown, the one
+/// that decided highlighted (or the implicit deny at the end).
+private struct AclDecisionView: View {
+    let decision: AclDecisionInfo
+
+    var body: some View {
+        InspectorSection("Access list \(decision.acl) \(decision.direction) on \(decision.interface.abbreviatedInterface)") {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(decision.lines, id: \.sequence) { line in
+                    row(sequence: "\(line.sequence)", text: line.text, matched: decision.matched == line.sequence)
+                }
+                row(sequence: "", text: "deny any (implicit)", matched: decision.matched == nil)
+            }
+            .padding(Theme.Spacing.s)
+            .background(Theme.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            Label(decision.permitted ? "Permitted" : "Dropped",
+                  systemImage: decision.permitted ? "checkmark.shield.fill" : "xmark.shield.fill")
+                .font(Theme.Font.labelSemibold)
+                .foregroundStyle(decision.permitted ? Theme.Palette.statusUp : Theme.Palette.statusDown)
+        }
+    }
+
+    private func row(sequence: String, text: String, matched: Bool) -> some View {
+        let color = decision.permitted ? Theme.Palette.statusUp : Theme.Palette.statusDown
+        return HStack(spacing: Theme.Spacing.s) {
+            Text(sequence)
+                .frame(width: 28, alignment: .trailing)
+                .foregroundStyle(Theme.Palette.textTertiary)
+            Text(text)
+                .foregroundStyle(matched ? Theme.Palette.textPrimary : Theme.Palette.textSecondary)
+            Spacer(minLength: 0)
+            if matched {
+                Image(systemName: "arrow.left").foregroundStyle(color)
+            }
+        }
+        .font(Theme.Font.monoSmall)
+        .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background(matched ? color.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 4))
     }
 }

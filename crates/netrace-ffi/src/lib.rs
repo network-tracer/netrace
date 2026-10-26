@@ -83,6 +83,8 @@ pub struct DeviceInfo {
     pub y: f64,
     /// IPv4 settings (end devices only).
     pub ip: Option<HostIpInfo>,
+    /// Gets its address from DHCP (end devices).
+    pub dhcp: bool,
     pub color: Option<Swatch>,
     pub group: Option<u64>,
 }
@@ -328,6 +330,13 @@ impl Project {
         self.lock().simulation_key()
     }
 
+    /// Switches an end device between DHCP and static settings; returns the previous mode.
+    pub fn set_host_dhcp(&self, id: u64, dhcp: bool) -> Result<bool, CoreError> {
+        self.lock()
+            .set_host_dhcp(doc::DeviceId(id), dhcp)
+            .map_err(invalid_operation)
+    }
+
     /// Renames a device; returns the previous name (for undo).
     pub fn rename_device(&self, id: u64, name: String) -> Result<String, CoreError> {
         self.lock()
@@ -343,6 +352,7 @@ impl Project {
         let settings = doc::DeviceSettings {
             name: removed.device.name.clone(),
             ip: removed.device.ip,
+            dhcp: removed.device.dhcp,
             config: removed.device.config.clone(),
             startup: removed.device.startup.clone(),
         };
@@ -357,6 +367,7 @@ impl Project {
     pub fn restore_device(&self, removed: RemovedDeviceInfo) -> Result<(), CoreError> {
         let mut device: doc::Device = removed.device.into();
         if let Ok(settings) = serde_json::from_str::<doc::DeviceSettings>(&removed.settings) {
+            device.dhcp = settings.dhcp;
             device.config = settings.config;
             device.startup = settings.startup;
         }
@@ -663,6 +674,7 @@ impl From<&doc::Device> for DeviceInfo {
             x: d.position.x,
             y: d.position.y,
             ip: d.ip.map(HostIpInfo::from),
+            dhcp: d.dhcp,
             color: d.color.map(Into::into),
             group: d.group.map(|g| g.0),
         }
@@ -677,6 +689,7 @@ impl From<DeviceInfo> for doc::Device {
             name: d.name,
             position: doc::Point::new(d.x, d.y),
             ip: d.ip.as_ref().and_then(|ip| doc::HostIp::try_from(ip).ok()),
+            dhcp: d.dhcp,
             color: d.color.map(Into::into),
             group: d.group.map(doc::GroupId),
             config: doc::DeviceConfig::default(),

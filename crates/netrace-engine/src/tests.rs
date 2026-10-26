@@ -1221,3 +1221,320 @@ fn stp_explains_roles_and_reconverges_when_a_link_fails() {
         unblocked.explanation
     );
 }
+
+// MARK: Services (M5): DHCP and ACLs
+
+use netrace_doc::{
+    AccessList, AclAction, AclAddress, AclEntry, AclKind, AclProtocol, DhcpPool, IcmpMatch,
+};
+
+fn dhcp_host(p: &mut Project) -> DeviceId {
+    let pc = p.add_device(DeviceKind::Pc, Point::default()).id;
+    p.set_host_dhcp(pc, true).unwrap();
+    pc
+}
+
+fn pool(p: &mut Project, r: DeviceId, name: &str, network: &str, gateway: &str) {
+    let mut config = p.device(r).unwrap().config.clone();
+    let mut pool = DhcpPool::new(name);
+    pool.network = Some((ip(network), 24));
+    pool.default_router = Some(ip(gateway));
+    pool.dns_server = Some(ip("8.8.8.8"));
+    config.dhcp_pools.push(pool);
+    p.set_device_config(r, config).unwrap();
+}
+
+#[test]
+fn dhcp_gives_a_pc_its_address_through_dora() {
+    let mut p = Project::new();
+    let r1 = p.add_device(DeviceKind::Router, Point::default()).id;
+    let sw = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    let pc = dhcp_host(&mut p);
+    p.connect(
+        end(r1, "GigabitEthernet0/0"),
+        end(sw, "GigabitEthernet0/1"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        end(sw, "FastEthernet0/1"),
+        end(pc, "FastEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    router_port(&mut p, r1, "GigabitEthernet0/0", "192.168.1.1", 24);
+    pool(&mut p, r1, "LAN", "192.168.1.0", "192.168.1.1");
+    let mut config = p.device(r1).unwrap().config.clone();
+    config
+        .dhcp_excluded
+        .push((ip("192.168.1.1"), ip("192.168.1.9")));
+    p.set_device_config(r1, config).unwrap();
+
+    let mut net = Network::new(p);
+    assert_eq!(
+        net.current_address(pc),
+        Some((ip("192.168.1.10"), 24, Some(ip("192.168.1.1")))),
+        "{:#?}",
+        net.trace()
+    );
+    let ops: Vec<String> = net
+        .trace()
+        .iter()
+        .filter(|e| e.outcome != Outcome::Flooded && e.outcome != Outcome::Forwarded)
+        .filter_map(|e| {
+            e.frame.and_then(|f| match f.payload {
+                crate::Payload::Ipv4(ip) => ip.udp().map(|u| u.dhcp.op.name().to_string()),
+                _ => None,
+            })
+        })
+        .collect();
+    // PC broadcasts Discover; R1 receives it; PC gets the Offer; R1 the Request; PC the ACK.
+    assert_eq!(
+        ops,
+        ["Discover", "Discover", "Offer", "Request", "ACK"],
+        "{ops:?}"
+    );
+    assert_eq!(net.dhcp_bindings(r1).len(), 1);
+    // And the leased address works: ping the gateway.
+    let s = net
+        .ping(pc, ip("192.168.1.1"), 2, SimTime::from_secs(10))
+        .unwrap();
+    assert_eq!(net.session(s).unwrap().replies.len(), 2);
+    assert!(
+        net.host_command(pc, "ipconfig", SimTime::from_secs(20))
+            .contains("DHCP Server.....................: 192.168.1.1")
+    );
+}
+
+#[test]
+fn dhcp_relay_carries_requests_to_a_remote_server() {
+    let (mut p, r1, r2, _, _) = two_routers(true);
+    let pc = dhcp_host(&mut p);
+    let sw = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    p.connect(
+        end(r2, "GigabitEthernet0/2"),
+        end(sw, "GigabitEthernet0/1"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        end(sw, "FastEthernet0/1"),
+        end(pc, "FastEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    router_port(&mut p, r2, "GigabitEthernet0/2", "192.168.3.1", 24);
+    // R1 is the server for the remote LAN; R2 relays.
+    pool(&mut p, r1, "REMOTE", "192.168.3.0", "192.168.3.1");
+    add_route(&mut p, r1, "192.168.3.0", 24, "10.0.0.2", 1);
+    let mut config = p.device(r2).unwrap().config.clone();
+    config
+        .interface_mut(DeviceKind::Router, "GigabitEthernet0/2")
+        .helper_addresses
+        .push(ip("10.0.0.1"));
+    p.set_device_config(r2, config).unwrap();
+
+    // Without the helper address the PC falls back to APIPA.
+    let mut no_helper = p.clone();
+    let mut c = no_helper.device(r2).unwrap().config.clone();
+    c.interface_mut(DeviceKind::Router, "GigabitEthernet0/2")
+        .helper_addresses
+        .clear();
+    no_helper.set_device_config(r2, c).unwrap();
+    let net = Network::new(no_helper);
+    assert_eq!(
+        net.current_address(pc).map(|a| a.0.octets()[..2].to_vec()),
+        Some(vec![169, 254])
+    );
+    assert!(
+        net.trace()
+            .iter()
+            .any(|e| e.summary.contains("routers don't forward broadcasts"))
+    );
+
+    let net = Network::new(p);
+    assert_eq!(
+        net.current_address(pc).map(|a| a.0),
+        Some(ip("192.168.3.2")),
+        "{:#?}",
+        net.trace()
+    );
+    assert!(
+        net.trace()
+            .iter()
+            .any(|e| e.device == r2 && e.summary.contains("ip helper-address 10.0.0.1"))
+    );
+    assert!(
+        net.trace()
+            .iter()
+            .any(|e| e.device == r2 && e.summary.contains("relay agent"))
+    );
+}
+
+fn acl(p: &mut Project, r: DeviceId, list: AccessList, iface: &str, inbound: bool) {
+    let mut config = p.device(r).unwrap().config.clone();
+    let name = list.name.clone();
+    config.access_lists.push(list);
+    let i = config.interface_mut(DeviceKind::Router, iface);
+    if inbound {
+        i.acl_in = Some(name)
+    } else {
+        i.acl_out = Some(name)
+    }
+    p.set_device_config(r, config).unwrap();
+}
+
+fn entry(
+    seq: u32,
+    action: AclAction,
+    protocol: AclProtocol,
+    src: AclAddress,
+    dst: AclAddress,
+    icmp: Option<IcmpMatch>,
+) -> AclEntry {
+    AclEntry {
+        sequence: seq,
+        action,
+        protocol,
+        source: src,
+        source_port: None,
+        destination: dst,
+        destination_port: None,
+        icmp,
+    }
+}
+
+#[test]
+fn acls_show_the_line_that_decides() {
+    let (mut p, r1, _, pc1, _) = two_routers(true);
+    acl(
+        &mut p,
+        r1,
+        AccessList {
+            name: "101".into(),
+            kind: AclKind::Extended,
+            entries: vec![
+                entry(
+                    10,
+                    AclAction::Deny,
+                    AclProtocol::Icmp,
+                    AclAddress::host(ip("192.168.1.10")),
+                    AclAddress::ANY,
+                    Some(IcmpMatch::Echo),
+                ),
+                entry(
+                    20,
+                    AclAction::Permit,
+                    AclProtocol::Ip,
+                    AclAddress::ANY,
+                    AclAddress::ANY,
+                    None,
+                ),
+            ],
+            remarks: vec![],
+        },
+        "GigabitEthernet0/0",
+        true,
+    );
+    let mut net = Network::new(p.clone());
+    let s = net.ping(pc1, ip("192.168.2.10"), 1, SimTime::ZERO).unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(
+        report.contains("Communication administratively prohibited"),
+        "{report}"
+    );
+    let dropped = net
+        .trace()
+        .iter()
+        .find(|e| e.device == r1 && e.outcome == Outcome::Dropped)
+        .unwrap();
+    assert!(
+        dropped
+            .summary
+            .contains("line 10: deny icmp host 192.168.1.10 any echo"),
+        "{}",
+        dropped.summary
+    );
+    let decision = dropped.acl.as_ref().expect("decision attached");
+    assert_eq!((decision.matched, decision.permitted), (Some(10), false));
+    assert_eq!(net.acl_hits(r1).get(&("101".to_string(), 10)), Some(&1));
+
+    // A standard list that permits only another network: the implicit deny drops it.
+    let (mut p, r1, r2, pc1, _) = two_routers(true);
+    acl(
+        &mut p,
+        r2,
+        AccessList {
+            name: "10".into(),
+            kind: AclKind::Standard,
+            entries: vec![entry(
+                10,
+                AclAction::Permit,
+                AclProtocol::Ip,
+                AclAddress {
+                    address: ip("172.16.0.0"),
+                    wildcard: ip("0.0.255.255"),
+                },
+                AclAddress::ANY,
+                None,
+            )],
+            remarks: vec![],
+        },
+        "GigabitEthernet0/0",
+        false,
+    );
+    let mut net = Network::new(p);
+    let s = net.ping(pc1, ip("192.168.2.10"), 3, SimTime::ZERO).unwrap();
+    assert!(net.session(s).unwrap().replies.is_empty());
+    assert!(
+        net.trace()
+            .iter()
+            .any(|e| e.device == r2 && e.summary.contains("implicit")),
+        "{:#?}",
+        net.trace()
+    );
+    let _ = r1;
+}
+
+#[test]
+fn permitted_traffic_names_its_rule() {
+    let (mut p, r1, _, pc1, _) = two_routers(true);
+    acl(
+        &mut p,
+        r1,
+        AccessList {
+            name: "ALLOW-LAN".into(),
+            kind: AclKind::Extended,
+            entries: vec![entry(
+                10,
+                AclAction::Permit,
+                AclProtocol::Icmp,
+                AclAddress {
+                    address: ip("192.168.1.0"),
+                    wildcard: ip("0.0.0.255"),
+                },
+                AclAddress::ANY,
+                None,
+            )],
+            remarks: vec![],
+        },
+        "GigabitEthernet0/0",
+        true,
+    );
+    let mut net = Network::new(p);
+    // The first two pings are lost while R1 and R2 resolve ARP.
+    let s = net.ping(pc1, ip("192.168.2.10"), 5, SimTime::ZERO).unwrap();
+    assert!(net.session(s).unwrap().replies.len() >= 3);
+    let routed = net
+        .trace()
+        .iter()
+        .find(|e| e.device == r1 && e.outcome == Outcome::Forwarded && e.acl.is_some())
+        .unwrap();
+    assert!(
+        routed
+            .summary
+            .contains("Access list ALLOW-LAN in on Gi0/0 permits it (line 10"),
+        "{}",
+        routed.summary
+    );
+}

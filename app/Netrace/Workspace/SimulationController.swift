@@ -10,6 +10,8 @@ final class SimulationController: ObservableObject {
     @Published private(set) var warnings: [String] = []
     /// VLANs, trunks and spanning tree for the canvas overlay.
     @Published private(set) var layer2: Layer2Overlay?
+    /// ACLs, DHCP relays and servers, for badges on the canvas.
+    @Published private(set) var services: [ServiceBadge] = []
 
     /// Seconds a frame takes to cross one cable.
     let hopLatency = Double(hopLatencyNs()) / 1_000_000_000
@@ -178,6 +180,10 @@ final class SimulationController: ObservableObject {
         }
     }
 
+    func currentAddress(of device: UInt64) -> CurrentAddress? {
+        simulation?.currentAddress(device: device)
+    }
+
     func stpView(vlan: UInt16) -> StpView? {
         simulation?.stpView(vlan: vlan)
     }
@@ -200,6 +206,8 @@ final class SimulationController: ObservableObject {
         warnings = simulation?.warnings() ?? []
         let overlay = simulation?.layer2Overlay()
         if overlay != layer2 { layer2 = overlay }
+        let badges = simulation?.serviceBadges() ?? []
+        if badges != services { services = badges }
     }
 
     private func nanoseconds(_ seconds: Double) -> UInt64 {

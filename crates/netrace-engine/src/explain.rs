@@ -92,7 +92,15 @@ pub(crate) fn ipv4(role: LayerRole, note: impl Into<String>, ip: &Ipv4Packet) ->
             field("Source IP", ip.src, changed),
             field("Destination IP", ip.dst, changed),
             field("TTL", ip.ttl, changed),
-            field("Carries", "ICMP (1)", changed),
+            field(
+                "Carries",
+                if ip.udp().is_some() {
+                    "UDP (17)"
+                } else {
+                    "ICMP (1)"
+                },
+                changed,
+            ),
         ],
     }
 }
@@ -113,6 +121,58 @@ pub(crate) fn icmp(role: LayerRole, note: impl Into<String>, icmp: &Icmp) -> Lay
     } else {
         fields.push(field("Identifier", format!("{:#06x}", icmp.id), changed));
         fields.push(field("Sequence", icmp.seq, changed));
+    }
+    LayerNote {
+        layer: Layer::Message,
+        role,
+        note: note.into(),
+        fields,
+    }
+}
+
+/// The message inside an IP packet: ICMP or DHCP.
+pub(crate) fn message(role: LayerRole, note: impl Into<String>, packet: &Ipv4Packet) -> LayerNote {
+    match packet.l4 {
+        crate::L4::Icmp(icmp) => self::icmp(role, note, &icmp),
+        crate::L4::Udp(udp) => dhcp(role, note, &udp),
+    }
+}
+
+pub(crate) fn dhcp(role: LayerRole, note: impl Into<String>, udp: &crate::Udp) -> LayerNote {
+    let changed = role == LayerRole::Changed;
+    let d = udp.dhcp;
+    let mut fields = vec![
+        field("Protocol", "DHCP over UDP", changed),
+        field(
+            "Ports",
+            format!("{} → {}", udp.src_port, udp.dst_port),
+            changed,
+        ),
+        field("Message", d.op.name(), changed),
+        field("Transaction ID", format!("{:#010x}", d.xid), changed),
+        field("Client MAC", d.client_mac, changed),
+    ];
+    if !d.your_ip.is_unspecified() {
+        fields.push(field(
+            "Your IP",
+            format!("{}/{}", d.your_ip, d.prefix_len),
+            changed,
+        ));
+    }
+    if let Some(r) = d.requested {
+        fields.push(field("Requested IP", r, changed));
+    }
+    if !d.server.is_unspecified() {
+        fields.push(field("Server", d.server, changed));
+    }
+    if !d.relay.is_unspecified() {
+        fields.push(field("Relay agent", d.relay, changed));
+    }
+    if let Some(r) = d.router {
+        fields.push(field("Router (gateway)", r, changed));
+    }
+    if let Some(dns) = d.dns {
+        fields.push(field("DNS server", dns, changed));
     }
     LayerNote {
         layer: Layer::Message,

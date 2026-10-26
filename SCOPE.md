@@ -325,7 +325,7 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | M2.5 ✅ | Canvas styling | Shapes (incl. *n*-sided polygons) with colours and interaction rules, device and note colours, distinct cable styles; smooth pinch / scroll zoom anchored at the pointer |
 | M3 ✅ | CLI + routing | IOS parser, router interfaces, static routes, traceroute, subinterfaces, SVIs; multi-line paste, config snippets, configs saved in the file, duplicate with variations. Subinterfaces and SVIs other than Vlan1 are configured and saved now and carry traffic once trunks arrive (M4) |
 | M4 ✅ | Switching | VLANs, trunks, STP, CDP/LLDP, port security; VLAN tinting and STP markers on the canvas; router-on-a-stick and SVI routing |
-| M5 | Services | DHCP, ACLs, NAT/PAT, OSPF, each with its canvas markers and visualiser effects |
+| M5 | Services | DHCP ✅ (server, relay, APIPA, DORA in the trace) and ACLs ✅ (standard / extended, numbered / named, deciding line in the inspector, shield badges); NAT/PAT and OSPF next, each with its canvas markers and visualiser effects |
 | M5.5 | Protocol views | STP view ✅ (built ahead of M5) (roles, reasons, blocked ports, reconvergence when a link fails); the same pattern reused for DHCP, ACL, NAT and OSPF as each lands |
 | M6 | Labs + polish | Lab engine, 20 labs, performance pass, beta |
 

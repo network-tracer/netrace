@@ -751,3 +751,142 @@ fn port_security_from_the_cli() {
     );
     assert!(c.run("show port-security address").contains("SecureSticky"));
 }
+
+// MARK: Services (M5)
+
+#[test]
+fn dhcp_server_from_the_cli() {
+    let mut p = Project::new();
+    let r1 = p.add_device(DeviceKind::Router, Point::default()).id;
+    let pc = p.add_device(DeviceKind::Pc, Point::default()).id;
+    p.set_host_dhcp(pc, true).unwrap();
+    p.connect(
+        Endpoint {
+            device: r1,
+            port: "GigabitEthernet0/0".into(),
+        },
+        Endpoint {
+            device: pc,
+            port: "FastEthernet0".into(),
+        },
+        Medium::Copper,
+    )
+    .unwrap();
+    let mut c = Console::new(p, r1);
+    c.lines(&[
+        "en",
+        "conf t",
+        "ip dhcp excluded-address 192.168.1.1 192.168.1.10",
+        "ip dhcp pool LAN",
+    ]);
+    assert_eq!(c.prompt(), "R1(dhcp-config)#");
+    c.lines(&[
+        "network 192.168.1.0 255.255.255.0",
+        "default-router 192.168.1.1",
+        "dns-server 8.8.8.8",
+        "int g0/0",
+        "ip address 192.168.1.1 255.255.255.0",
+        "no shut",
+        "end",
+    ]);
+    let run = c.run("show run");
+    assert!(run.contains("ip dhcp excluded-address 192.168.1.1 192.168.1.10\n!\nip dhcp pool LAN\n network 192.168.1.0 255.255.255.0\n default-router 192.168.1.1\n dns-server 8.8.8.8"), "{run}");
+    c.network = Network::new(c.project.clone());
+    let binding = c.run("show ip dhcp binding");
+    assert!(binding.contains("192.168.1.11"), "{binding}");
+    assert!(
+        c.run("show ip dhcp pool")
+            .contains("Leased addresses               : 1")
+    );
+}
+
+#[test]
+fn access_lists_from_the_cli() {
+    let (p, r1, _) = lab();
+    let mut c = Console::new(p, r1);
+    c.lines(&[
+        "en",
+        "conf t",
+        "access-list 101 remark No pings from PC1",
+        "access-list 101 deny icmp host 192.168.1.10 any echo",
+        "access-list 101 permit ip any any",
+        // IOS ignores a repeated entry.
+        "access-list 101 permit ip any any",
+        "access-list 10 permit 192.168.1.0 0.0.0.255",
+        "ip access-list extended WEB",
+    ]);
+    assert_eq!(c.prompt(), "R1(config-ext-nacl)#");
+    c.lines(&[
+        "permit udp any any eq bootps",
+        "15 deny icmp any any",
+        "exit",
+    ]);
+    let out = c.run("access-list 102 permit icmp any anywhere");
+    assert!(
+        out.contains("% Invalid input detected at '^' marker."),
+        "{out}"
+    );
+    let caret = out.lines().next().unwrap().find('^').unwrap();
+    assert_eq!(
+        caret,
+        "R1(config)#access-list 102 permit icmp any ".len(),
+        "{out}"
+    );
+    c.lines(&[
+        "int g0/0",
+        "ip address 192.168.1.1 255.255.255.0",
+        "no shut",
+        "ip access-group 101 in",
+        "int g0/1",
+        "ip address 192.168.2.1 255.255.255.0",
+        "no shut",
+        "end",
+    ]);
+    let run = c.run("show run");
+    assert!(
+        run.contains(" ip address 192.168.1.1 255.255.255.0\n ip access-group 101 in"),
+        "{run}"
+    );
+    assert!(run.contains("access-list 101 remark No pings from PC1\naccess-list 101 deny icmp host 192.168.1.10 any echo\naccess-list 101 permit ip any any"), "{run}");
+    assert_eq!(
+        run.matches("access-list 101 permit ip any any").count(),
+        1,
+        "{run}"
+    );
+    assert!(
+        run.contains("access-list 10 permit 192.168.1.0 0.0.0.255"),
+        "{run}"
+    );
+    assert!(
+        run.contains(
+            "ip access-list extended WEB\n permit udp any any eq bootps\n deny icmp any any"
+        ),
+        "{run}"
+    );
+
+    let pc1 = c
+        .project
+        .devices()
+        .iter()
+        .find(|d| d.name == "PC1")
+        .unwrap()
+        .id;
+    c.network = Network::new(c.project.clone());
+    c.network
+        .ping(pc1, "192.168.2.10".parse().unwrap(), 2, SimTime::ZERO)
+        .unwrap();
+    let acls = c.run("show access-lists");
+    assert!(
+        acls.contains(
+            "Extended IP access list 101\n    10 deny icmp host 192.168.1.10 any echo (2 matches)"
+        ),
+        "{acls}"
+    );
+    assert!(
+        acls.contains(
+            "Standard IP access list 10\n    10 permit 192.168.1.0, wildcard bits 0.0.0.255"
+        ),
+        "{acls}"
+    );
+    assert!(acls.contains("Extended IP access list WEB\n    10 permit udp any any eq bootps\n    15 deny icmp any any"), "{acls}");
+}

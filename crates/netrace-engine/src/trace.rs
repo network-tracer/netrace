@@ -104,4 +104,6 @@ pub struct TraceEvent {
     pub layers: Vec<LayerNote>,
     /// The ping this step belongs to, if any.
     pub session: Option<u64>,
+    /// The access list this device checked, and its verdict.
+    pub acl: Option<crate::AclDecision>,
 }

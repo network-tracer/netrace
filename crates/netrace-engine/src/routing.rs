@@ -6,12 +6,13 @@ use std::net::Ipv4Addr;
 use netrace_doc::DeviceId;
 use netrace_sim::SimTime;
 
+use crate::acl::{AclDecision, AclDirection};
 use crate::explain;
 use crate::network::{ARP_TIMEOUT, Arrival, Event, session_of};
 use crate::probe::ProbeResult;
 use crate::stack::{Iface, Route, RouteSource, Stack, StackKind, Waiting};
 use crate::{
-    ArpOp, ArpPacket, Frame, Icmp, IcmpKind, Ipv4Packet, Layer, LayerRole, MacAddr, Network,
+    ArpOp, ArpPacket, Frame, Icmp, IcmpKind, Ipv4Packet, L4, Layer, LayerRole, MacAddr, Network,
     Outcome, Payload, Unreachable, abbreviate_port,
 };
 
@@ -147,7 +148,22 @@ impl Network {
                 self.flush_waiting(now, id, arp.sender_ip);
             }
             Payload::Ipv4(packet) => {
-                if let Some(own) = stack.owner_of(packet.dst) {
+                // Inbound access list on a router interface, before anything else.
+                if stack.kind == StackKind::Router
+                    && let Some(decision) = self.check_acl(id, &iface, AclDirection::In, &packet)
+                {
+                    if !decision.permitted {
+                        return self
+                            .acl_drop(now, id, &stack, &iface, arrival, frame, packet, decision);
+                    }
+                    self.pending_acl = Some(decision);
+                }
+                // Broadcast DHCP is for every device on the link (servers, relays, clients).
+                let broadcast =
+                    packet.dst == std::net::Ipv4Addr::BROADCAST && packet.udp().is_some();
+                if broadcast {
+                    self.deliver_locally(now, id, &stack, &iface, arrival, frame, packet, accepted);
+                } else if let Some(own) = stack.owner_of(packet.dst) {
                     let own = own.clone();
                     self.deliver_locally(now, id, &stack, &own, arrival, frame, packet, accepted);
                 } else if stack.forwarding {
@@ -312,6 +328,12 @@ impl Network {
         packet: Ipv4Packet,
         accepted: String,
     ) {
+        let icmp = match packet.l4 {
+            L4::Icmp(icmp) => icmp,
+            L4::Udp(udp) => {
+                return self.dhcp_receive(now, id, stack, own, arrival, frame, packet, udp);
+            }
+        };
         let name = self.name(id);
         let port = abbreviate_port(&arrival.port);
         let session = session_of(&packet);
@@ -323,17 +345,17 @@ impl Network {
         } else {
             format!("the address of {name}'s {}", abbreviate_port(&own.name))
         };
-        match packet.icmp.kind {
+        match icmp.kind {
             IcmpKind::EchoRequest => {
                 let reply = Ipv4Packet {
                     src: packet.dst,
                     dst: packet.src,
                     ttl: stack.ttl,
-                    icmp: Icmp {
+                    l4: L4::Icmp(Icmp {
                         kind: IcmpKind::EchoReply,
-                        id: packet.icmp.id,
-                        seq: packet.icmp.seq,
-                    },
+                        id: icmp.id,
+                        seq: icmp.seq,
+                    }),
                 };
                 let route = stack.resolve(packet.src).map(|(r, ..)| r.clone());
                 let layers = vec![
@@ -352,22 +374,22 @@ impl Network {
                     explain::icmp(
                         LayerRole::Used,
                         "An echo request, so it answers with an echo reply.",
-                        &packet.icmp,
+                        &icmp,
                     ),
                 ];
                 let summary = match (&route, stack.kind) {
                     (Some(_), _) => format!(
                         "{name} receives ping {} from {} and answers with an ICMP echo reply.",
-                        packet.icmp.seq, packet.src
+                        icmp.seq, packet.src
                     ),
                     (None, StackKind::Host) => format!(
                         "{name} receives ping {} from {}, but can't answer: {} is on another network and \
                          {name} has no default gateway.",
-                        packet.icmp.seq, packet.src, packet.src
+                        icmp.seq, packet.src, packet.src
                     ),
                     (None, _) => format!(
                         "{name} receives ping {} from {}, but can't answer: it has no route back to {}.",
-                        packet.icmp.seq, packet.src, packet.src
+                        icmp.seq, packet.src, packet.src
                     ),
                 };
                 let (outcome, egress) = match route {
@@ -390,7 +412,7 @@ impl Network {
                 }
             }
             IcmpKind::EchoReply => {
-                let seq = packet.icmp.seq;
+                let seq = icmp.seq;
                 let mut late = false;
                 let mut rtt = std::time::Duration::ZERO;
                 let mut waited = false;
@@ -412,7 +434,7 @@ impl Network {
                     explain::icmp(
                         LayerRole::Used,
                         "The echo reply that answers the ping.",
-                        &packet.icmp,
+                        &icmp,
                     ),
                 ];
                 let traceroute = session
@@ -466,7 +488,7 @@ impl Network {
                 }
             }
             IcmpKind::TimeExceeded | IcmpKind::Unreachable(_) => {
-                let seq = packet.icmp.seq;
+                let seq = icmp.seq;
                 let probe = session
                     .and_then(|s| self.sessions.get(s as usize))
                     .and_then(|s| s.probe(seq))
@@ -477,7 +499,7 @@ impl Network {
                     .map(|sent| now - sent)
                     .unwrap_or_default();
                 let reporter = self.who_ip(packet.src);
-                let (note, summary, result) = match packet.icmp.kind {
+                let (note, summary, result) = match icmp.kind {
                     IcmpKind::TimeExceeded => {
                         let ttl = probe.map(|p| p.ttl).unwrap_or(0);
                         (
@@ -518,7 +540,7 @@ impl Network {
                         format!("Addressed to {name}, from {}.", packet.src),
                         &packet,
                     ),
-                    explain::icmp(LayerRole::Used, note, &packet.icmp),
+                    explain::icmp(LayerRole::Used, note, &icmp),
                 ];
                 self.record(
                     now,
@@ -638,6 +660,26 @@ impl Network {
         };
         let because = describe_route(&route, packet.dst);
         let o = abbreviate_port(&out_iface.name);
+        // Outbound access list on the exit interface.
+        if let Some(decision) = self.check_acl(id, &out_iface, AclDirection::Out, &packet) {
+            if !decision.permitted {
+                return self.acl_drop(now, id, stack, &out_iface, arrival, frame, packet, decision);
+            }
+            self.pending_acl = Some(decision);
+        }
+        let acl_note = self
+            .pending_acl
+            .as_ref()
+            .map(|d| {
+                format!(
+                    " Access list {} {} on {} permits it ({}).",
+                    d.acl,
+                    d.direction.ios(),
+                    abbreviate_port(&d.interface),
+                    d.rule()
+                )
+            })
+            .unwrap_or_default();
 
         if let Some(entry) = stack.arp.get(&next_hop) {
             let new_frame = Frame {
@@ -670,7 +712,7 @@ impl Network {
             ];
             let summary = format!(
                 "{name} routes the packet for {}: {because}. It lowers the TTL to {}, puts a new Ethernet header \
-                 on it (from its {o} to {}), and sends it out {o}.",
+                 on it (from its {o} to {}), and sends it out {o}.{acl_note}",
                 packet.dst,
                 out.ttl,
                 self.who_ip(next_hop)
@@ -721,6 +763,110 @@ impl Network {
         self.set_session(session);
     }
 
+    /// The access list applied to an interface in one direction, checked
+    /// against a packet; counts the matching line.
+    fn check_acl(
+        &mut self,
+        id: DeviceId,
+        iface: &Iface,
+        direction: AclDirection,
+        packet: &Ipv4Packet,
+    ) -> Option<AclDecision> {
+        let d = self.project.device(id)?;
+        let config = d.config.interface(d.kind, &iface.name);
+        let name = match direction {
+            AclDirection::In => config.acl_in,
+            AclDirection::Out => config.acl_out,
+        }?;
+        let decision = crate::acl::evaluate(id, &d.config, &name, direction, &iface.name, packet)?;
+        if let Some(seq) = decision.matched {
+            *self
+                .acl_hits
+                .entry((id, decision.acl.clone(), seq))
+                .or_default() += 1;
+        }
+        Some(decision)
+    }
+
+    /// A packet an access list denies: dropped, with the line responsible,
+    /// and ICMP "administratively prohibited" back to the sender.
+    #[allow(clippy::too_many_arguments)]
+    fn acl_drop(
+        &mut self,
+        now: SimTime,
+        id: DeviceId,
+        stack: &Stack,
+        iface: &Iface,
+        arrival: Arrival,
+        frame: Frame,
+        packet: Ipv4Packet,
+        decision: AclDecision,
+    ) {
+        let name = self.name(id);
+        let session = session_of(&packet);
+        let what = match packet.l4 {
+            L4::Icmp(_) => "packet",
+            L4::Udp(_) => "DHCP packet",
+        };
+        let summary = format!(
+            "{name} checks access list {} {} on {} against the {what} from {} to {}. It matches {}, so the packet is \
+             dropped{}.",
+            decision.acl,
+            decision.direction.ios(),
+            abbreviate_port(&decision.interface),
+            packet.src,
+            packet.dst,
+            decision.rule(),
+            if packet.is_icmp_error() || packet.dst == std::net::Ipv4Addr::BROADCAST {
+                String::new()
+            } else {
+                format!(
+                    " and {name} tells {} with ICMP \"administratively prohibited\"",
+                    packet.src
+                )
+            }
+        );
+        let layers = vec![
+            explain::physical(format!("Arrived on {}.", abbreviate_port(&arrival.port))),
+            explain::data_link(LayerRole::Used, "Read and passed up for routing.", &frame),
+            explain::ipv4(
+                LayerRole::Used,
+                format!(
+                    "Source {} and destination {} checked against the access list.",
+                    packet.src, packet.dst
+                ),
+                &packet,
+            ),
+            explain::message(
+                LayerRole::Used,
+                "Protocol and type checked too (extended lists).",
+                &packet,
+            ),
+        ];
+        self.pending_acl = Some(decision);
+        self.record(
+            now,
+            id,
+            Some(&arrival),
+            Some(frame),
+            Outcome::Dropped,
+            summary,
+            layers,
+            Vec::new(),
+        );
+        self.set_session(session);
+        if packet.dst != std::net::Ipv4Addr::BROADCAST {
+            self.send_error(
+                now,
+                id,
+                stack,
+                iface,
+                packet,
+                IcmpKind::Unreachable(Unreachable::Prohibited),
+            );
+        }
+    }
+
     /// ICMP error back to the packet's source (never about another error).
     fn send_error(
         &mut self,
@@ -731,9 +877,10 @@ impl Network {
         original: Ipv4Packet,
         kind: IcmpKind,
     ) {
-        if original.icmp.kind.is_error() {
+        if original.is_icmp_error() {
             return;
         }
+        let (quoted_id, quoted_seq) = original.icmp().map(|i| (i.id, i.seq)).unwrap_or((0, 0));
         let Some(src) = in_iface.address.map(|a| a.address).or_else(|| {
             stack
                 .resolve(original.src)
@@ -748,11 +895,11 @@ impl Network {
             src,
             dst: original.src,
             ttl: stack.ttl,
-            icmp: Icmp {
+            l4: L4::Icmp(Icmp {
                 kind,
-                id: original.icmp.id,
-                seq: original.icmp.seq,
-            },
+                id: quoted_id,
+                seq: quoted_seq,
+            }),
         };
         self.send_from(now, id, error, session_of(&original), true);
     }
@@ -822,7 +969,7 @@ impl Network {
                         &frame,
                     ),
                     explain::ipv4(LayerRole::Changed, ttl_text, &packet),
-                    explain::icmp(LayerRole::Changed, icmp_note(&packet), &packet.icmp),
+                    explain::message(LayerRole::Changed, icmp_note(&packet), &packet),
                 ];
                 self.record(
                     now,
@@ -887,8 +1034,8 @@ impl Network {
             });
         }
         if let Some(s) = session.and_then(|s| self.sessions.get_mut(s as usize))
-            && packet.icmp.kind == IcmpKind::EchoRequest
-            && let Some(probe) = s.probe_mut(packet.icmp.seq)
+            && let Some(icmp) = packet.icmp().filter(|i| i.kind == IcmpKind::EchoRequest)
+            && let Some(probe) = s.probe_mut(icmp.seq)
         {
             probe.waited_for_arp = true;
         }
@@ -998,6 +1145,16 @@ impl Network {
 
     /// Puts a frame on the wire from an interface: its own port, or through
     /// the switch for a `Vlan1` interface. Returns the ports it left by.
+    /// Puts a frame on the wire with no session tag (DHCP).
+    pub(crate) fn stack_transmit_frame(
+        &mut self,
+        id: DeviceId,
+        iface: &Iface,
+        frame: Frame,
+    ) -> Vec<String> {
+        self.stack_transmit(id, iface, frame, None)
+    }
+
     fn stack_transmit(
         &mut self,
         id: DeviceId,
@@ -1060,7 +1217,7 @@ impl Network {
                 self.settle(
                     now,
                     s,
-                    w.packet.icmp.seq,
+                    w.packet.icmp().map(|i| i.seq).unwrap_or(0),
                     ProbeResult::Failed("no ARP reply".into()),
                 );
             }
@@ -1112,18 +1269,26 @@ pub(crate) fn describe_route(route: &Route, dst: Ipv4Addr) -> String {
 }
 
 fn describe_packet(packet: &Ipv4Packet) -> String {
-    match packet.icmp.kind {
-        IcmpKind::EchoRequest => format!("ping {} (an ICMP echo request)", packet.icmp.seq),
-        IcmpKind::EchoReply => format!("the reply to ping {}", packet.icmp.seq),
+    let icmp = match packet.l4 {
+        L4::Icmp(icmp) => icmp,
+        L4::Udp(udp) => return format!("a DHCP {}", udp.dhcp.op.name()),
+    };
+    match icmp.kind {
+        IcmpKind::EchoRequest => format!("ping {} (an ICMP echo request)", icmp.seq),
+        IcmpKind::EchoReply => format!("the reply to ping {}", icmp.seq),
         IcmpKind::TimeExceeded => "an ICMP Time Exceeded message".into(),
         IcmpKind::Unreachable(_) => "an ICMP Destination Unreachable message".into(),
     }
 }
 
 fn icmp_note(packet: &Ipv4Packet) -> String {
-    match packet.icmp.kind {
-        IcmpKind::EchoRequest => format!("Echo request number {}.", packet.icmp.seq),
-        IcmpKind::EchoReply => format!("Echo reply number {}.", packet.icmp.seq),
+    let icmp = match packet.l4 {
+        L4::Icmp(icmp) => icmp,
+        L4::Udp(udp) => return format!("DHCP {}, relayed to the server.", udp.dhcp.op.name()),
+    };
+    match icmp.kind {
+        IcmpKind::EchoRequest => format!("Echo request number {}.", icmp.seq),
+        IcmpKind::EchoReply => format!("Echo reply number {}.", icmp.seq),
         IcmpKind::TimeExceeded => {
             "Time exceeded: tells the sender where its packet's TTL ran out.".into()
         }

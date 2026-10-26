@@ -9,6 +9,7 @@
 mod grammar;
 mod iface;
 mod render;
+mod services;
 mod switching;
 #[cfg(test)]
 mod tests;
@@ -56,6 +57,10 @@ pub(crate) enum Mode {
     Line(String),
     /// `vlan 10` (or several VLANs at once).
     Vlan(Vec<u16>),
+    /// `ip dhcp pool NAME`.
+    DhcpPool(String),
+    /// `ip access-list standard|extended NAME`.
+    Acl(String, netrace_doc::AclKind),
 }
 
 /// A question waiting for the next line.
@@ -103,6 +108,8 @@ impl Session {
             Mode::Subinterface(_) => Ctx::Subinterface,
             Mode::Line(_) => Ctx::Line,
             Mode::Vlan(_) => Ctx::Vlan,
+            Mode::DhcpPool(_) => Ctx::DhcpPool,
+            Mode::Acl(..) => Ctx::Acl,
         }
     }
 
@@ -153,6 +160,9 @@ impl Session {
             Mode::Range(_) => format!("{name}(config-if-range)#"),
             Mode::Subinterface(_) => format!("{name}(config-subif)#"),
             Mode::Vlan(_) => format!("{name}(config-vlan)#"),
+            Mode::DhcpPool(_) => format!("{name}(dhcp-config)#"),
+            Mode::Acl(_, netrace_doc::AclKind::Standard) => format!("{name}(config-std-nacl)#"),
+            Mode::Acl(_, netrace_doc::AclKind::Extended) => format!("{name}(config-ext-nacl)#"),
             Mode::Line(_) => format!("{name}(config-line)#"),
         }
     }
@@ -837,8 +847,12 @@ impl Session {
             }
             other => {
                 let _ = line;
-                self.switching(other, values, kind, project, network)
-                    .unwrap_or_else(|| format!("% {other} is not available yet."))
+                match self.switching(other, values, kind, project, network) {
+                    Some(out) => out,
+                    None => self
+                        .services(other, values, line, kind, project, network)
+                        .unwrap_or_else(|| format!("% {other} is not available yet.")),
+                }
             }
         }
     }

@@ -71,6 +71,48 @@ pub struct TraceEventInfo {
     pub length: Option<u32>,
     pub layers: Vec<LayerNoteInfo>,
     pub session: Option<u64>,
+    /// The access list checked at this hop, with the deciding line.
+    pub acl: Option<AclDecisionInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AclLineInfo {
+    pub sequence: u32,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AclDecisionInfo {
+    pub acl: String,
+    /// "in" or "out".
+    pub direction: String,
+    pub interface: String,
+    pub lines: Vec<AclLineInfo>,
+    /// The line that matched; none means the implicit deny.
+    pub matched: Option<u32>,
+    pub permitted: bool,
+}
+
+/// An end device's address right now, however it got it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CurrentAddress {
+    pub address: String,
+    pub prefix_len: u8,
+    pub gateway: Option<String>,
+    pub dhcp_server: Option<String>,
+    /// 169.254.x.x: DHCP failed.
+    pub apipa: bool,
+}
+
+/// Where services are configured, for canvas badges.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ServiceBadge {
+    pub device_id: u64,
+    /// Physical port (subinterfaces map to their port).
+    pub port: Option<String>,
+    /// "acl-in", "acl-out", "relay" or "dhcp-server".
+    pub kind: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -277,6 +319,21 @@ impl From<&engine::TraceEvent> for TraceEventInfo {
                 })
                 .collect(),
             session: e.session,
+            acl: e.acl.as_ref().map(|a| AclDecisionInfo {
+                acl: a.acl.clone(),
+                direction: a.direction.ios().to_string(),
+                interface: a.interface.clone(),
+                lines: a
+                    .lines
+                    .iter()
+                    .map(|(sequence, text)| AclLineInfo {
+                        sequence: *sequence,
+                        text: text.clone(),
+                    })
+                    .collect(),
+                matched: a.matched,
+                permitted: a.permitted,
+            }),
         }
     }
 }
@@ -554,5 +611,75 @@ impl Simulation {
                 })
                 .collect(),
         }
+    }
+}
+
+#[uniffi::export]
+impl Simulation {
+    /// The address an end device has after everything run so far (static,
+    /// leased from DHCP, or APIPA).
+    pub fn current_address(&self, device: u64) -> Option<CurrentAddress> {
+        let network = self.lock();
+        let (address, prefix_len, gateway) = network.current_address(doc::DeviceId(device))?;
+        Some(CurrentAddress {
+            address: address.to_string(),
+            prefix_len,
+            gateway: gateway.map(|g| g.to_string()),
+            dhcp_server: network
+                .held_lease(doc::DeviceId(device))
+                .map(|l| l.server.to_string()),
+            apipa: address.octets()[..2] == [169, 254],
+        })
+    }
+
+    /// ACLs, DHCP relays and DHCP servers, for badges on the canvas.
+    pub fn service_badges(&self) -> Vec<ServiceBadge> {
+        let network = self.lock();
+        let mut badges = Vec::new();
+        for d in network
+            .project()
+            .devices()
+            .iter()
+            .filter(|d| d.kind.has_cli())
+        {
+            if !d.config.dhcp_pools.is_empty() {
+                let pools: Vec<String> =
+                    d.config.dhcp_pools.iter().map(|p| p.name.clone()).collect();
+                badges.push(ServiceBadge {
+                    device_id: d.id.0,
+                    port: None,
+                    kind: "dhcp-server".into(),
+                    label: format!("DHCP server: {}", pools.join(", ")),
+                });
+            }
+            for (name, iface) in &d.config.interfaces {
+                let port = name.split('.').next().unwrap_or(name).to_string();
+                for (kind, acl) in [("acl-in", &iface.acl_in), ("acl-out", &iface.acl_out)] {
+                    if let Some(acl) = acl {
+                        let direction = if kind == "acl-in" { "in" } else { "out" };
+                        badges.push(ServiceBadge {
+                            device_id: d.id.0,
+                            port: Some(port.clone()),
+                            kind: kind.into(),
+                            label: format!("ACL {acl} {direction} on {name}"),
+                        });
+                    }
+                }
+                if !iface.helper_addresses.is_empty() {
+                    let helpers: Vec<String> = iface
+                        .helper_addresses
+                        .iter()
+                        .map(|h| h.to_string())
+                        .collect();
+                    badges.push(ServiceBadge {
+                        device_id: d.id.0,
+                        port: Some(port.clone()),
+                        kind: "relay".into(),
+                        label: format!("DHCP relay to {}", helpers.join(", ")),
+                    });
+                }
+            }
+        }
+        badges
     }
 }

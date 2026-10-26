@@ -166,7 +166,8 @@ struct CanvasView: View {
 
             LinksLayer(document: document, workspace: workspace, positions: positions,
                        layer2: workspace.showsLayer2 ? simulation.layer2 : nil,
-                       stp: StpDisplay.make(simulation: simulation, workspace: workspace))
+                       stp: StpDisplay.make(simulation: simulation, workspace: workspace),
+                       services: workspace.showsLayer2 ? simulation.services : [])
                 .allowsHitTesting(false)
 
             ForEach(document.state.links) { link in
@@ -222,6 +223,8 @@ struct CanvasView: View {
                          rootVlans: workspace.showsLayer2
                             ? (simulation.layer2?.roots.filter { $0.deviceId == device.id }.map(\.vlan) ?? []) : [],
                          isStpRoot: stpRoot == device.id,
+                         isDHCPServer: workspace.showsLayer2
+                            && simulation.services.contains { $0.deviceId == device.id && $0.kind == "dhcp-server" },
                          isSelected: workspace.selection.contains(device.id) || pendingCableSource == device.id
                             || workspace.pduSource == device.id,
                          zoom: workspace.zoom,
@@ -1005,6 +1008,7 @@ private struct NodeView: View {
     var rootVlans: [UInt16] = []
     /// The root bridge in the STP view: highlighted with a ring.
     var isStpRoot = false
+    var isDHCPServer = false
     let isSelected: Bool
     let zoom: CGFloat
     /// Returns false if the name was rejected, keeping the field open.
@@ -1026,6 +1030,18 @@ private struct NodeView: View {
                         .fill(Theme.Palette.statusWarning.opacity(0.18))
                         .overlay(Circle().strokeBorder(Theme.Palette.statusWarning, lineWidth: 2))
                         .frame(width: 64, height: 64)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if isDHCPServer {
+                    Text("DHCP")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color(light: 0x2F9E5B, dark: 0x3DB46D)))
+                        .offset(x: 10, y: 4)
+                        .help("This router hands out addresses with DHCP")
                 }
             }
             .overlay(alignment: .topLeading) {

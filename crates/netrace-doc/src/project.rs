@@ -58,6 +58,9 @@ pub struct Device {
     /// IPv4 settings for end devices; absent until configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ip: Option<HostIp>,
+    /// An end device that gets its address from DHCP (then `ip` is unused).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dhcp: bool,
     /// Tint of the device symbol; `None` is the default ink.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Swatch>,
@@ -78,6 +81,8 @@ pub struct DeviceSettings {
     pub name: String,
     #[serde(default)]
     pub ip: Option<HostIp>,
+    #[serde(default)]
+    pub dhcp: bool,
     #[serde(default)]
     pub config: DeviceConfig,
     #[serde(default)]
@@ -309,6 +314,7 @@ impl Project {
             name: self.next_free_name(kind),
             position: Point::new(position.x, position.y),
             ip: None,
+            dhcp: false,
             color: None,
             group: None,
             config: DeviceConfig::default(),
@@ -408,6 +414,7 @@ impl Project {
             d.kind.hash(&mut hasher);
             d.name.hash(&mut hasher);
             d.ip.hash(&mut hasher);
+            d.dhcp.hash(&mut hasher);
             serde_json::to_string(&d.config)
                 .unwrap_or_default()
                 .hash(&mut hasher);
@@ -423,6 +430,7 @@ impl Project {
         Ok(DeviceSettings {
             name: d.name.clone(),
             ip: d.ip,
+            dhcp: d.dhcp,
             config: d.config.clone(),
             startup: d.startup.clone(),
         })
@@ -445,6 +453,7 @@ impl Project {
             settings.config.validate(device.kind)?;
         }
         device.ip = settings.ip.filter(|_| device.kind.is_host());
+        device.dhcp = settings.dhcp && device.kind.is_host();
         device.config = settings.config;
         device.startup = settings.startup;
         *self = candidate;
@@ -518,6 +527,16 @@ impl Project {
             }
         }
         Ok(previous)
+    }
+
+    /// Switches an end device between DHCP and its static settings;
+    /// returns the previous mode.
+    pub fn set_host_dhcp(&mut self, id: DeviceId, dhcp: bool) -> Result<bool, DocError> {
+        let device = self.device_mut(id)?;
+        if !device.kind.is_host() {
+            return Err(DocError::NotAHost(device.name.clone()));
+        }
+        Ok(std::mem::replace(&mut device.dhcp, dhcp))
     }
 
     /// Removes a device and every link attached to it.
@@ -1194,6 +1213,7 @@ mod tests {
             &include_bytes!("../../../examples/office-lan.netrace/project.json")[..],
             &include_bytes!("../../../examples/two-lans.netrace/project.json")[..],
             &include_bytes!("../../../examples/vlans.netrace/project.json")[..],
+            &include_bytes!("../../../examples/services.netrace/project.json")[..],
         ] {
             let p = Project::from_json(bytes).unwrap();
             assert!(!p.devices().is_empty());

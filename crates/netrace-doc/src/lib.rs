@@ -10,6 +10,7 @@ mod device;
 mod error;
 mod ip;
 mod project;
+mod services;
 mod style;
 mod switching;
 
@@ -24,6 +25,10 @@ pub use ip::{HostIp, prefix_from_mask};
 pub use project::{
     CanvasItem, Device, DeviceId, DeviceSettings, Endpoint, Link, LinkId, Point, Project,
     RemovedDevice,
+};
+pub use services::{
+    AccessList, AclAction, AclAddress, AclEntry, AclKind, AclProtocol, DhcpPool, IcmpMatch,
+    PortMatch, port_name,
 };
 pub use style::{GroupId, LinePattern, ShapeKind, ShapeStyle, Swatch};
 pub use switching::{

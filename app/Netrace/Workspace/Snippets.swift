@@ -125,6 +125,28 @@ final class SnippetStore: ObservableObject {
              switchport port-security mac-address sticky
              switchport port-security violation {{Violation=shutdown}}
             """, isBuiltIn: true),
+        Snippet(name: "DHCP pool", body: """
+            ip dhcp excluded-address {{First excluded=192.168.1.1}} {{Last excluded=192.168.1.10}}
+            ip dhcp pool {{Pool name=LAN}}
+             network {{Network=192.168.1.0}} {{Mask=255.255.255.0}}
+             default-router {{Gateway=192.168.1.1}}
+             dns-server {{DNS server=8.8.8.8}}
+            """, isBuiltIn: true),
+        Snippet(name: "DHCP relay", body: """
+            interface {{Interface on the clients' network=g0/1}}
+             ip helper-address {{DHCP server address}}
+            """, isBuiltIn: true),
+        Snippet(name: "Standard ACL", body: """
+            access-list {{Number=10}} permit {{Allowed network=192.168.1.0}} {{Wildcard=0.0.0.255}}
+            interface {{Interface=g0/0}}
+             ip access-group {{Number=10}} {{Direction=out}}
+            """, isBuiltIn: true),
+        Snippet(name: "Extended ACL", body: """
+            access-list {{Number=101}} deny icmp {{Source=host 192.168.1.10}} {{Destination=any}} echo
+            access-list {{Number=101}} permit ip any any
+            interface {{Interface=g0/0}}
+             ip access-group {{Number=101}} {{Direction=in}}
+            """, isBuiltIn: true),
         Snippet(name: "Switch management address", body: """
             interface vlan 1
              ip address {{Address}} {{Mask=255.255.255.0}}

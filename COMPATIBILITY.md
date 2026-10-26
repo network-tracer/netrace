@@ -35,7 +35,11 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 | `switchport port-security ...` | ✅ | | | Sticky MACs aren't written back to the running-config |
 | `cdp run`, `cdp enable`, `lldp run` | ✅ | | | |
 | `ip default-gateway`, `ip routing`, `no switchport` | ✅ | | | |
-| DHCP, ACLs, NAT, OSPF | ⬜ | | | M5 |
+| `ip dhcp pool`, `network`, `default-router`, `dns-server`, `domain-name`, `ip dhcp excluded-address` | ✅ | | | No lease timers: leases last for the run |
+| `ip helper-address` | ✅ | | | Relays DHCP only |
+| `access-list N permit/deny/remark` (standard and extended), `ip access-list standard/extended NAME`, sequence numbers | ✅ | | | TCP lines parse but never match: no TCP traffic yet |
+| `ip access-group N in/out` | ✅ | | | |
+| NAT, OSPF | ⬜ | | | M5 |
 
 ## show commands
 
@@ -43,6 +47,8 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 |---|---|---|---|
 | `show running-config`, `show startup-config` | ✅ | | |
 | `show ip interface brief`, `show interfaces [X]` | ✅ | | |
+| `show ip dhcp binding`, `show ip dhcp pool` | ✅ | | |
+| `show access-lists [X]`, `show ip access-lists [X]` (with match counts) | ✅ | | |
 | `show ip route` | ✅ | | |
 | `show arp`, `show mac address-table` | ✅ | | |
 | `show vlan [brief]`, `show interfaces trunk/status/X switchport` | ✅ | | |

@@ -10,6 +10,8 @@
 //! command is added, so the trace is always a pure function of the topology
 //! and the commands. That keeps simulation mode freely scrubbable.
 
+mod acl;
+mod dhcp;
 mod explain;
 mod frame;
 mod mac;
@@ -25,8 +27,11 @@ mod tests;
 mod trace;
 mod views;
 
+pub use acl::{AclDecision, AclDirection};
+pub use dhcp::DhcpBinding;
 pub use frame::{
-    ArpOp, ArpPacket, Frame, Icmp, IcmpKind, Ipv4Packet, Payload, Protocol, Unreachable,
+    ArpOp, ArpPacket, DHCP_CLIENT_PORT, DHCP_SERVER_PORT, Dhcp, DhcpOp, Frame, Icmp, IcmpKind,
+    Ipv4Packet, L4, Payload, Protocol, Udp, Unreachable,
 };
 pub use mac::MacAddr;
 pub use network::{EngineError, HOP_LATENCY, Network};

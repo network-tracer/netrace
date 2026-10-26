@@ -181,7 +181,7 @@ impl Stack {
             k if k.is_host() => {
                 let port = k.port_names().into_iter().next()?;
                 let up = ports.cabled.contains(&(id, port.clone()));
-                let address = d.ip.map(|ip| InterfaceAddress {
+                let address = d.ip.filter(|_| !d.dhcp).map(|ip| InterfaceAddress {
                     address: ip.address,
                     prefix_len: ip.prefix_len,
                 });
@@ -196,7 +196,7 @@ impl Stack {
                     vlan: None,
                     native: false,
                 });
-                if let Some(gateway) = d.ip.and_then(|ip| ip.gateway) {
+                if let Some(gateway) = d.ip.filter(|_| !d.dhcp).and_then(|ip| ip.gateway) {
                     stack.routes.push(Route {
                         network: Ipv4Addr::UNSPECIFIED,
                         prefix_len: 0,

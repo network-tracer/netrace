@@ -197,6 +197,23 @@ extension ProjectDocument {
         }
     }
 
+    /// Switches an end device between DHCP and its static settings, with undo.
+    func setHostDHCP(_ id: UInt64, _ dhcp: Bool, undoManager: UndoManager?) -> Result<Void, CoreError> {
+        do {
+            let previous = try project.setHostDhcp(id: id, dhcp: dhcp)
+            guard previous != dhcp else { return .success(()) }
+            refresh()
+            registerUndo(undoManager, name: dhcp ? "Use DHCP" : "Use Static Address") { doc, undo in
+                _ = doc.setHostDHCP(id, previous, undoManager: undo)
+            }
+            return .success(())
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
     /// A fresh simulation of the current topology.
     func makeSimulation() -> Simulation {
         Simulation(project: project)

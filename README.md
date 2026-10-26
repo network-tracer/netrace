@@ -19,7 +19,8 @@ make test    # Rust tests
 make lint    # rustfmt + clippy
 ```
 
-Open `examples/vlans.netrace` for a VLAN, trunk and router-on-a-stick lab
+Open `examples/services.netrace` for a DHCP and access list lab,
+`examples/vlans.netrace` for a VLAN, trunk and router-on-a-stick lab
 (with a redundant link spanning tree blocks), `examples/two-lans.netrace` to
 configure a router in its console and route between two LANs, `examples/office-lan.netrace` to try the simulation
 (pings between configured PCs), `examples/starter.netrace` for a small

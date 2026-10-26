@@ -124,6 +124,32 @@ pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig
         out += "!\n";
     }
     out += "no aaa new-model\n!\n";
+    for (low, high) in &config.dhcp_excluded {
+        if low == high {
+            let _ = writeln!(out, "ip dhcp excluded-address {low}");
+        } else {
+            let _ = writeln!(out, "ip dhcp excluded-address {low} {high}");
+        }
+    }
+    if !config.dhcp_excluded.is_empty() {
+        out += "!\n";
+    }
+    for pool in &config.dhcp_pools {
+        let _ = writeln!(out, "ip dhcp pool {}", pool.name);
+        if let Some((net, len)) = pool.network {
+            let _ = writeln!(out, " network {net} {}", netrace_doc::mask(len));
+        }
+        if let Some(r) = pool.default_router {
+            let _ = writeln!(out, " default-router {r}");
+        }
+        if let Some(d) = pool.dns_server {
+            let _ = writeln!(out, " dns-server {d}");
+        }
+        if let Some(d) = &pool.domain_name {
+            let _ = writeln!(out, " domain-name {d}");
+        }
+        out += "!\n";
+    }
     if !config.domain_lookup {
         out += "no ip domain lookup\n";
     }
@@ -186,6 +212,15 @@ pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig
                 None => out += " no ip address\n",
             }
         }
+        for helper in &iface.helper_addresses {
+            let _ = writeln!(out, " ip helper-address {helper}");
+        }
+        if let Some(acl) = &iface.acl_in {
+            let _ = writeln!(out, " ip access-group {acl} in");
+        }
+        if let Some(acl) = &iface.acl_out {
+            let _ = writeln!(out, " ip access-group {acl} out");
+        }
         if router && kind.has_port(&name) {
             out += " duplex auto\n speed auto\n";
         }
@@ -220,6 +255,31 @@ pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig
         );
     }
     if !config.routes.is_empty() {
+        out += "!\n";
+    }
+    for acl in &config.access_lists {
+        if acl.is_numbered() {
+            for remark in &acl.remarks {
+                let _ = writeln!(out, "access-list {} remark {remark}", acl.name);
+            }
+            for e in &acl.entries {
+                let _ = writeln!(out, "access-list {} {}", acl.name, e.config_line(acl.kind));
+            }
+        } else {
+            let kind = match acl.kind {
+                netrace_doc::AclKind::Standard => "standard",
+                netrace_doc::AclKind::Extended => "extended",
+            };
+            let _ = writeln!(out, "ip access-list {kind} {}", acl.name);
+            for remark in &acl.remarks {
+                let _ = writeln!(out, " remark {remark}");
+            }
+            for e in &acl.entries {
+                let _ = writeln!(out, " {}", e.config_line(acl.kind));
+            }
+        }
+    }
+    if !config.access_lists.is_empty() {
         out += "!\n";
     }
     if let Some(banner) = &config.banner_motd {

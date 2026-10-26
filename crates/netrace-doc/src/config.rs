@@ -9,7 +9,7 @@ use std::net::Ipv4Addr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DeviceKind, DocError, StpConfig, SwitchportConfig, VlanConfig};
+use crate::{AccessList, DeviceKind, DhcpPool, DocError, StpConfig, SwitchportConfig, VlanConfig};
 
 /// An address and prefix configured on an interface (`ip address A M`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -63,6 +63,15 @@ pub struct InterfaceConfig {
     /// Layer 2 settings of a switch port.
     #[serde(skip_serializing_if = "SwitchportConfig::is_default")]
     pub switchport: SwitchportConfig,
+    /// `ip helper-address`: DHCP relay to these servers.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub helper_addresses: Vec<Ipv4Addr>,
+    /// `ip access-group X in`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acl_in: Option<String>,
+    /// `ip access-group X out`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acl_out: Option<String>,
 }
 
 /// Where a static route sends traffic.
@@ -146,6 +155,13 @@ pub struct DeviceConfig {
     /// `lldp run` (off by default).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub lldp_run: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dhcp_pools: Vec<DhcpPool>,
+    /// `ip dhcp excluded-address A [B]`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dhcp_excluded: Vec<(Ipv4Addr, Ipv4Addr)>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub access_lists: Vec<AccessList>,
 }
 
 fn is_true(value: &bool) -> bool {
@@ -169,6 +185,9 @@ impl Default for DeviceConfig {
             spanning_tree: StpConfig::default(),
             cdp_run: true,
             lldp_run: false,
+            dhcp_pools: Vec::new(),
+            dhcp_excluded: Vec::new(),
+            access_lists: Vec::new(),
         }
     }
 }
@@ -185,6 +204,18 @@ impl DeviceConfig {
             .collect();
         ids.dedup();
         ids
+    }
+
+    pub fn access_list(&self, name: &str) -> Option<&AccessList> {
+        self.access_lists
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn dhcp_excluded(&self, ip: Ipv4Addr) -> bool {
+        self.dhcp_excluded
+            .iter()
+            .any(|(a, b)| (u32::from(*a)..=u32::from(*b)).contains(&u32::from(ip)))
     }
 
     pub fn vlan_exists(&self, id: u16) -> bool {

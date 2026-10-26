@@ -6,6 +6,7 @@ use std::time::Duration;
 use netrace_doc::{DeviceId, DeviceKind, LinkId, Project};
 use netrace_sim::{Scheduler, SimTime};
 
+use crate::dhcp::{DhcpBinding, DhcpClient};
 use crate::explain;
 use crate::probe::{PingSession, Probe, ProbeResult, ReportStyle, SessionKind};
 use crate::stack::{PortStates, Stack, StackKind};
@@ -82,6 +83,18 @@ pub(crate) enum Event {
         device: DeviceId,
         ip: Ipv4Addr,
     },
+    /// An end device starts DHCP (at power-on, or `ipconfig /renew`).
+    DhcpStart {
+        host: DeviceId,
+    },
+    DhcpRetry {
+        host: DeviceId,
+        xid: u32,
+    },
+    DhcpTimeout {
+        host: DeviceId,
+        xid: u32,
+    },
 }
 
 /// Where a frame came from, for the trace.
@@ -131,6 +144,18 @@ pub struct Network {
     /// Ports shut down by a port security violation.
     pub(crate) psec_disabled: BTreeSet<PortKey>,
     pub(crate) violations: BTreeMap<PortKey, u32>,
+    pub(crate) dhcp_clients: BTreeMap<DeviceId, DhcpClient>,
+    /// Addresses servers have offered and are holding, by (server, client MAC).
+    pub(crate) dhcp_offers: BTreeMap<(DeviceId, MacAddr), Ipv4Addr>,
+    pub(crate) dhcp_bindings: BTreeMap<DeviceId, BTreeMap<MacAddr, DhcpBinding>>,
+    /// The lease each DHCP client holds.
+    pub(crate) dhcp_leases_held: BTreeMap<DeviceId, crate::Dhcp>,
+    /// `ipconfig /renew` typed on end devices, replayed with everything else.
+    renewals: Vec<(SimTime, DeviceId)>,
+    /// ACL line hits, by (device, list, sequence), for `show access-lists`.
+    pub(crate) acl_hits: BTreeMap<(DeviceId, String, u32), u32>,
+    /// The ACL decision to attach to the next event this device records.
+    pub(crate) pending_acl: Option<crate::AclDecision>,
     pub(crate) trace: Vec<TraceEvent>,
     pub(crate) sessions: Vec<PingSession>,
     warnings: Vec<String>,
@@ -153,6 +178,13 @@ impl Network {
             secure: BTreeMap::new(),
             psec_disabled: BTreeSet::new(),
             violations: BTreeMap::new(),
+            dhcp_clients: BTreeMap::new(),
+            dhcp_offers: BTreeMap::new(),
+            dhcp_bindings: BTreeMap::new(),
+            dhcp_leases_held: BTreeMap::new(),
+            renewals: Vec::new(),
+            acl_hits: BTreeMap::new(),
+            pending_acl: None,
             trace: Vec::new(),
             sessions: Vec::new(),
             warnings: Vec::new(),
@@ -224,6 +256,12 @@ impl Network {
         self.add_command(source, destination, SessionKind::Traceroute, 0, at)
     }
 
+    /// `ipconfig /renew` on an end device at `at`: a new DHCP exchange.
+    pub fn renew(&mut self, host: DeviceId, at: SimTime) {
+        self.renewals.push((at, host));
+        self.rebuild();
+    }
+
     fn add_command(
         &mut self,
         source: DeviceId,
@@ -261,6 +299,12 @@ impl Network {
         self.secure.clear();
         self.psec_disabled.clear();
         self.violations.clear();
+        self.dhcp_clients.clear();
+        self.dhcp_offers.clear();
+        self.dhcp_bindings.clear();
+        self.dhcp_leases_held.clear();
+        self.acl_hits.clear();
+        self.pending_acl = None;
         let ports = &self.ports;
         let l2 = &self.l2;
         let project = &self.project;
@@ -352,6 +396,20 @@ impl Network {
                 )
             })
             .collect();
+        // DHCP clients ask for an address as soon as they're on.
+        for d in self
+            .project
+            .devices()
+            .iter()
+            .filter(|d| d.kind.is_host() && d.dhcp)
+        {
+            let _ = self
+                .scheduler
+                .schedule_at(SimTime::ZERO, Event::DhcpStart { host: d.id });
+        }
+        for &(at, host) in &self.renewals {
+            let _ = self.scheduler.schedule_at(at, Event::DhcpStart { host });
+        }
         for (i, c) in self.commands.iter().enumerate() {
             let session = i as u64;
             if self.sessions[i].is_sequential() {
@@ -447,6 +505,9 @@ impl Network {
             Event::ProbeSend { session, seq } => self.probe_send(now, session, seq),
             Event::ProbeTimeout { session, seq } => self.probe_timeout(now, session, seq),
             Event::ArpTimeout { device, ip } => self.arp_timeout(now, device, ip),
+            Event::DhcpStart { host } => self.dhcp_start(now, host),
+            Event::DhcpRetry { host, xid } => self.dhcp_retry(now, host, xid),
+            Event::DhcpTimeout { host, xid } => self.dhcp_timeout(now, host, xid),
         }
     }
 
@@ -606,11 +667,11 @@ impl Network {
             src,
             dst: destination,
             ttl,
-            icmp: crate::Icmp {
+            l4: crate::L4::Icmp(crate::Icmp {
                 kind: crate::IcmpKind::EchoRequest,
                 id: session as u16 + 1,
                 seq,
-            },
+            }),
         };
         self.sessions[session as usize]
             .probe_mut(seq)
@@ -873,6 +934,7 @@ impl Network {
             summary,
             layers,
             session,
+            acl: self.pending_acl.take().filter(|a| a.device == device),
         });
     }
 
@@ -888,7 +950,9 @@ impl Network {
 /// The session an ICMP packet belongs to (its identifier is session + 1;
 /// errors quote the identifier of the probe that caused them).
 pub(crate) fn session_of(packet: &Ipv4Packet) -> Option<u64> {
-    u64::from(packet.icmp.id).checked_sub(1)
+    packet
+        .icmp()
+        .and_then(|icmp| u64::from(icmp.id).checked_sub(1))
 }
 
 /// "Fa0/1, Fa0/2 and Gi0/1".

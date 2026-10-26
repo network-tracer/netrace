@@ -23,6 +23,17 @@ impl Network {
         match words.as_slice() {
             [] => String::new(),
             [cmd] if cmd.eq_ignore_ascii_case("ipconfig") => self.ipconfig(device),
+            [cmd, flag]
+                if cmd.eq_ignore_ascii_case("ipconfig") && flag.eq_ignore_ascii_case("/renew") =>
+            {
+                if !self.project.device(device).is_some_and(|d| d.dhcp) {
+                    return "An error occurred while renewing interface FastEthernet0: DHCP is not enabled on this \
+                            adapter. Switch its IP configuration to DHCP first."
+                        .into();
+                }
+                self.renew(device, at);
+                self.ipconfig(device)
+            }
             [cmd, flag] if cmd.eq_ignore_ascii_case("arp") && flag.eq_ignore_ascii_case("-a") => {
                 self.arp_table(device)
             }
@@ -58,6 +69,7 @@ impl Network {
                  ping [-n count] <address>   Send echo requests and show the replies\n  \
                  tracert <address>           List the routers on the way to an address\n  \
                  ipconfig                    Show this device's IP configuration\n  \
+                 ipconfig /renew             Ask DHCP for an address again\n  \
                  arp -a                      Show the ARP cache (IP-to-MAC entries)"
                 .into(),
             [cmd, ..] => format!(
@@ -86,28 +98,36 @@ impl Network {
         let Some(iface) = self.stack(device).and_then(|s| s.ifaces.first()) else {
             return format!("{} has no IP configuration of its own.", self.name(device));
         };
-        let gateway = self
-            .project
-            .device(device)
-            .and_then(|d| d.ip)
-            .and_then(|ip| ip.gateway);
+        let dhcp = self.project.device(device).is_some_and(|d| d.dhcp);
         let mut out = format!(
-            "{} Connection:\n\n   Physical Address................: {}\n",
+            "{} Connection:\n\n   Physical Address................: {}\n   DHCP Enabled....................: {}\n",
             abbreviate_port(&iface.name),
-            iface.mac
+            iface.mac,
+            if dhcp { "Yes" } else { "No" }
         );
-        match iface.address {
-            Some(a) => {
+        match self.current_address(device) {
+            Some((address, prefix, gateway)) => {
+                let label = if address.octets()[..2] == [169, 254] {
+                    "Autoconfiguration IPv4 Address.."
+                } else {
+                    "IPv4 Address...................."
+                };
                 out += &format!(
-                    "   IPv4 Address....................: {}\n   Subnet Mask.....................: {}\n   \
+                    "   {label}: {address}\n   Subnet Mask.....................: {}\n   \
                      Default Gateway.................: {}\n",
-                    a.address,
-                    a.mask(),
+                    netrace_doc::mask(prefix),
                     gateway
                         .map(|g| g.to_string())
                         .unwrap_or_else(|| "0.0.0.0".into())
                 );
+                if let Some(lease) = self.held_lease(device) {
+                    out += &format!("   DHCP Server.....................: {}\n", lease.server);
+                    if let Some(dns) = lease.dns {
+                        out += &format!("   DNS Servers.....................: {dns}\n");
+                    }
+                }
             }
+            None if dhcp => out += "   IPv4 Address....................: (waiting for DHCP)\n",
             None => out += "   IPv4 Address....................: not configured\n",
         }
         out
@@ -166,8 +186,14 @@ fn windows_ping(s: &PingSession) -> String {
                 let what = match code {
                     Unreachable::Network => "net",
                     Unreachable::Host => "host",
+                    Unreachable::Prohibited => "prohibited",
                 };
-                out += &format!("Reply from {from}: Destination {what} unreachable.\n");
+                if what == "prohibited" {
+                    out +=
+                        &format!("Reply from {from}: Communication administratively prohibited.\n");
+                } else {
+                    out += &format!("Reply from {from}: Destination {what} unreachable.\n");
+                }
             }
             Some(ProbeResult::Failed(reason)) if reason == "no ARP reply" => {
                 out += "Destination host unreachable.\n"

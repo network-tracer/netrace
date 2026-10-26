@@ -25,6 +25,10 @@ pub enum Ctx {
     Line,
     /// `SW1(config-vlan)#`
     Vlan,
+    /// `R1(dhcp-config)#`
+    DhcpPool,
+    /// `R1(config-std-nacl)#` / `R1(config-ext-nacl)#`
+    Acl,
 }
 
 impl Ctx {
@@ -72,9 +76,9 @@ const CONFIG: &[Ctx] = &[Config];
 const IF: &[Ctx] = &[Interface, Subinterface];
 const SUBIF: &[Ctx] = &[Subinterface];
 const LINE: &[Ctx] = &[Line];
-const CONFIG_ANY: &[Ctx] = &[Config, Interface, Subinterface, Line, Vlan];
+const CONFIG_ANY: &[Ctx] = &[Config, Interface, Subinterface, Line, Vlan, DhcpPool, Acl];
 /// Global configuration commands that also work from sub-modes (`interface`, `line`, `vlan`).
-const CONFIG_NAV: &[Ctx] = &[Config, Interface, Subinterface, Line, Vlan];
+const CONFIG_NAV: &[Ctx] = &[Config, Interface, Subinterface, Line, Vlan, DhcpPool, Acl];
 const SWITCHPORT: &[Ctx] = &[Interface];
 
 macro_rules! cmd {
@@ -186,6 +190,27 @@ pub(crate) const COMMANDS: &[Command] = &[
         "show port-security address",
         EXEC,
         Devices::Switch
+    ),
+    cmd!(
+        "show-dhcp-binding",
+        "show ip dhcp binding",
+        EXEC,
+        Devices::Router
+    ),
+    cmd!("show-dhcp-pool", "show ip dhcp pool", EXEC, Devices::Router),
+    cmd!(
+        "show-acls",
+        "show access-lists [WORD]",
+        EXEC,
+        Devices::Any,
+        &["ACL number or name"]
+    ),
+    cmd!(
+        "show-ip-acls",
+        "show ip access-lists [WORD]",
+        EXEC,
+        Devices::Any,
+        &["ACL number or name"]
     ),
     // Global configuration
     cmd!(
@@ -579,6 +604,209 @@ pub(crate) const COMMANDS: &[Command] = &[
         Devices::Switch,
         &["VLAN IDs"]
     ),
+    // DHCP and access lists
+    cmd!(
+        "dhcp-pool",
+        "ip dhcp pool WORD",
+        CONFIG_NAV,
+        Devices::Router,
+        &["Pool name"]
+    ),
+    cmd!(
+        "no-dhcp-pool",
+        "no ip dhcp pool WORD",
+        CONFIG,
+        Devices::Router,
+        &["Pool name"]
+    ),
+    cmd!(
+        "dhcp-network",
+        "network A.B.C.D A.B.C.D",
+        &[DhcpPool],
+        Devices::Router,
+        &["Network number in dotted-decimal notation", "Network mask"]
+    ),
+    cmd!(
+        "dhcp-router",
+        "default-router A.B.C.D",
+        &[DhcpPool],
+        Devices::Router,
+        &["Router's IP address"]
+    ),
+    cmd!(
+        "dhcp-dns",
+        "dns-server A.B.C.D",
+        &[DhcpPool],
+        Devices::Router,
+        &["Server's IP address"]
+    ),
+    cmd!(
+        "dhcp-domain",
+        "domain-name WORD",
+        &[DhcpPool],
+        Devices::Router,
+        &["Domain name"]
+    ),
+    cmd!(
+        "dhcp-excluded",
+        "ip dhcp excluded-address A.B.C.D [A.B.C.D]",
+        CONFIG,
+        Devices::Router,
+        &["Low IP address", "High IP address"]
+    ),
+    cmd!(
+        "no-dhcp-excluded",
+        "no ip dhcp excluded-address A.B.C.D [A.B.C.D]",
+        CONFIG,
+        Devices::Router,
+        &["Low IP address", "High IP address"]
+    ),
+    cmd!(
+        "helper",
+        "ip helper-address A.B.C.D",
+        IF,
+        Devices::Any,
+        &["IP destination address"]
+    ),
+    cmd!(
+        "no-helper",
+        "no ip helper-address [A.B.C.D]",
+        IF,
+        Devices::Any,
+        &["IP destination address"]
+    ),
+    cmd!(
+        "access-group",
+        "ip access-group WORD in",
+        IF,
+        Devices::Any,
+        &["Access list number or name"]
+    ),
+    cmd!(
+        "access-group",
+        "ip access-group WORD out",
+        IF,
+        Devices::Any,
+        &["Access list number or name"]
+    ),
+    cmd!(
+        "no-access-group",
+        "no ip access-group WORD in",
+        IF,
+        Devices::Any,
+        &["Access list number or name"]
+    ),
+    cmd!(
+        "no-access-group",
+        "no ip access-group WORD out",
+        IF,
+        Devices::Any,
+        &["Access list number or name"]
+    ),
+    cmd!(
+        "acl-numbered",
+        "access-list <1-2699> permit LINE",
+        CONFIG,
+        Devices::Any,
+        &[
+            "IP access list number",
+            "Source (standard) or protocol, source, destination (extended)"
+        ]
+    ),
+    cmd!(
+        "acl-numbered",
+        "access-list <1-2699> deny LINE",
+        CONFIG,
+        Devices::Any,
+        &[
+            "IP access list number",
+            "Source (standard) or protocol, source, destination (extended)"
+        ]
+    ),
+    cmd!(
+        "acl-remark",
+        "access-list <1-2699> remark LINE",
+        CONFIG,
+        Devices::Any,
+        &["IP access list number", "Comment up to 100 characters"]
+    ),
+    cmd!(
+        "no-acl",
+        "no access-list <1-2699>",
+        CONFIG,
+        Devices::Any,
+        &["IP access list number"]
+    ),
+    cmd!(
+        "acl-named",
+        "ip access-list standard WORD",
+        CONFIG_NAV,
+        Devices::Any,
+        &["Access list name"]
+    ),
+    cmd!(
+        "acl-named",
+        "ip access-list extended WORD",
+        CONFIG_NAV,
+        Devices::Any,
+        &["Access list name"]
+    ),
+    cmd!(
+        "no-acl-named",
+        "no ip access-list standard WORD",
+        CONFIG,
+        Devices::Any,
+        &["Access list name"]
+    ),
+    cmd!(
+        "no-acl-named",
+        "no ip access-list extended WORD",
+        CONFIG,
+        Devices::Any,
+        &["Access list name"]
+    ),
+    cmd!(
+        "nacl-permit",
+        "permit LINE",
+        &[Acl],
+        Devices::Any,
+        &["Source (standard) or protocol, source, destination (extended)"]
+    ),
+    cmd!(
+        "nacl-deny",
+        "deny LINE",
+        &[Acl],
+        Devices::Any,
+        &["Source (standard) or protocol, source, destination (extended)"]
+    ),
+    cmd!(
+        "nacl-seq-permit",
+        "<1-2147483647> permit LINE",
+        &[Acl],
+        Devices::Any,
+        &["Sequence Number", "Matching conditions"]
+    ),
+    cmd!(
+        "nacl-seq-deny",
+        "<1-2147483647> deny LINE",
+        &[Acl],
+        Devices::Any,
+        &["Sequence Number", "Matching conditions"]
+    ),
+    cmd!(
+        "nacl-no-seq",
+        "no <1-2147483647>",
+        &[Acl],
+        Devices::Any,
+        &["Sequence Number"]
+    ),
+    cmd!(
+        "nacl-remark",
+        "remark LINE",
+        &[Acl],
+        Devices::Any,
+        &["Comment up to 100 characters"]
+    ),
     cmd!("cdp-run", "cdp run", CONFIG),
     cmd!("no-cdp-run", "no cdp run", CONFIG),
     cmd!("lldp-run", "lldp run", CONFIG),
@@ -709,6 +937,25 @@ pub(crate) fn keyword_help(keyword: &str, ctx: Ctx) -> &'static str {
         "name" => "Ascii name of the VLAN",
         "range" => "interface range command",
         "status" => "Show interface line status",
+        "dhcp" => "Configure DHCP server and relay parameters / DHCP information",
+        "pool" => "Configure DHCP address pools / DHCP pools information",
+        "binding" => "DHCP address bindings",
+        "excluded-address" => "Prevent DHCP from assigning certain addresses",
+        "network" => "Network number and mask",
+        "default-router" => "Default routers",
+        "dns-server" => "DNS servers",
+        "domain-name" => "Domain name",
+        "helper-address" => "Specify a destination address for UDP broadcasts",
+        "access-group" => "Specify access control for packets",
+        "access-list" => "Add an access list entry",
+        "access-lists" => "List access lists",
+        "standard" => "Standard Access List",
+        "extended" => "Extended Access List",
+        "permit" => "Specify packets to forward",
+        "deny" => "Specify packets to reject",
+        "remark" => "Access list entry comment",
+        "in" => "inbound packets",
+        "out" => "outbound packets",
         "login" => "Enable password checking",
         "logging" => "Modify message logging facilities",
         "synchronous" => "Synchronized message output",

@@ -40,6 +40,8 @@ struct LinksLayer: View {
     var layer2: Layer2Overlay?
     /// Port roles in the STP view (replaces the lights).
     var stp: StpDisplay?
+    /// ACL and relay badges at interface ends.
+    var services: [ServiceBadge] = []
 
     var body: some View {
         Canvas { context, _ in
@@ -83,9 +85,19 @@ struct LinksLayer: View {
                     // Below the device sits its name label; put the light past it.
                     let offset: CGFloat = dir.y * sign > 0.5 ? 28 : 6
                     let p = CGPoint(x: center.x + dir.x * sign * (edge + offset), y: center.y + dir.y * sign * (edge + offset))
+                    let endKey = sign > 0 ? PortKey(device: link.a.deviceId, port: link.a.port)
+                                          : PortKey(device: link.b.deviceId, port: link.b.port)
+                    let badges = services.filter { $0.deviceId == endKey.device && $0.port == endKey.port }
+                    if !badges.isEmpty {
+                        // Past the light, towards the middle of the cable.
+                        var at = CGPoint(x: p.x + dir.x * sign * 18, y: p.y + dir.y * sign * 18)
+                        for badge in badges {
+                            Self.drawServiceBadge(badge, at: at, in: &context)
+                            at = CGPoint(x: at.x + dir.x * sign * 16, y: at.y + dir.y * sign * 16)
+                        }
+                    }
                     if let stp {
-                        let key = sign > 0 ? PortKey(device: link.a.deviceId, port: link.a.port)
-                                           : PortKey(device: link.b.deviceId, port: link.b.port)
+                        let key = endKey
                         if let role = stp.roles[key] {
                             Self.drawRole(role, at: p, highlighted: stp.changed.contains(key), in: &context)
                             continue
@@ -182,6 +194,20 @@ struct LinksLayer: View {
                 context.stroke(railPath, with: .color(color), style: style)
             }
         }
+    }
+
+    /// A shield for an access list (in or out), an arrow for a DHCP relay.
+    static func drawServiceBadge(_ badge: ServiceBadge, at p: CGPoint, in context: inout GraphicsContext) {
+        let (symbol, color): (String, Color) = switch badge.kind {
+        case "acl-in": ("shield.lefthalf.filled", Theme.Palette.statusWarning)
+        case "acl-out": ("shield.righthalf.filled", Theme.Palette.statusWarning)
+        default: ("arrow.uturn.right.circle.fill", Color(light: 0x2F9E5B, dark: 0x3DB46D))
+        }
+        let back = Path(ellipseIn: CGRect(x: p.x - 8, y: p.y - 8, width: 16, height: 16))
+        context.fill(back, with: .color(Theme.Palette.canvas))
+        var image = context.resolve(Image(systemName: symbol))
+        image.shading = .color(color)
+        context.draw(image, in: CGRect(x: p.x - 6.5, y: p.y - 6.5, width: 13, height: 13))
     }
 
     /// STP view: a lettered badge for the port's role (R, D, or a red ✕).
