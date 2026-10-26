@@ -156,6 +156,12 @@ pub struct Network {
     pub(crate) acl_hits: BTreeMap<(DeviceId, String, u32), u32>,
     /// The ACL decision to attach to the next event this device records.
     pub(crate) pending_acl: Option<crate::AclDecision>,
+    /// Each router's NAT translation table.
+    pub(crate) nat_tables: BTreeMap<DeviceId, Vec<crate::NatEntry>>,
+    /// NAT (hits, misses) per router, for `show ip nat statistics`.
+    pub(crate) nat_hits: BTreeMap<DeviceId, (u32, u32)>,
+    /// The NAT decision to attach to the next event this device records.
+    pub(crate) pending_nat: Option<crate::NatDecision>,
     pub(crate) trace: Vec<TraceEvent>,
     pub(crate) sessions: Vec<PingSession>,
     warnings: Vec<String>,
@@ -185,6 +191,9 @@ impl Network {
             renewals: Vec::new(),
             acl_hits: BTreeMap::new(),
             pending_acl: None,
+            nat_tables: BTreeMap::new(),
+            nat_hits: BTreeMap::new(),
+            pending_nat: None,
             trace: Vec::new(),
             sessions: Vec::new(),
             warnings: Vec::new(),
@@ -305,6 +314,9 @@ impl Network {
         self.dhcp_leases_held.clear();
         self.acl_hits.clear();
         self.pending_acl = None;
+        self.nat_tables.clear();
+        self.nat_hits.clear();
+        self.pending_nat = None;
         let ports = &self.ports;
         let l2 = &self.l2;
         let project = &self.project;
@@ -935,6 +947,7 @@ impl Network {
             layers,
             session,
             acl: self.pending_acl.take().filter(|a| a.device == device),
+            nat: self.pending_nat.take().filter(|n| n.device == device),
         });
     }
 

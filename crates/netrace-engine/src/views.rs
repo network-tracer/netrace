@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use netrace_doc::{DeviceId, Project};
+use netrace_sim::SimTime;
 
 use crate::stack::{PortStates, Route, Stack};
 use crate::{MacAddr, Network};
@@ -270,6 +271,44 @@ impl Network {
             .filter(|((d, _, _), _)| *d == id)
             .map(|((_, acl, seq), n)| ((acl.clone(), *seq), *n))
             .collect()
+    }
+
+    /// The NAT table as `show ip nat translations` lists it: static
+    /// mappings from the config first, then what traffic has created.
+    pub fn nat_translations(&self, id: DeviceId) -> Vec<crate::NatEntry> {
+        let mut rows: Vec<crate::NatEntry> = self
+            .project
+            .device(id)
+            .map(|d| {
+                d.config
+                    .nat_rules
+                    .iter()
+                    .filter_map(|r| match r {
+                        netrace_doc::NatRule::Static { local, global } => Some(crate::NatEntry {
+                            proto: None,
+                            local: *local,
+                            local_port: 0,
+                            global: *global,
+                            global_port: 0,
+                            outside: Ipv4Addr::UNSPECIFIED,
+                            outside_port: 0,
+                            kind: crate::NatKind::Static,
+                            rule: r.config_line(),
+                            created: SimTime::ZERO,
+                        }),
+                        netrace_doc::NatRule::Dynamic { .. } => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        rows.extend(self.nat_tables.get(&id).into_iter().flatten().cloned());
+        rows
+    }
+
+    /// NAT (hits, misses): packets that used an existing translation, and
+    /// ones that needed a new one.
+    pub fn nat_hits(&self, id: DeviceId) -> (u32, u32) {
+        self.nat_hits.get(&id).copied().unwrap_or_default()
     }
 
     /// VLAN membership and spanning tree as the simulation uses them.

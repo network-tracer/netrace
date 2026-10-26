@@ -1214,6 +1214,7 @@ mod tests {
             &include_bytes!("../../../examples/two-lans.netrace/project.json")[..],
             &include_bytes!("../../../examples/vlans.netrace/project.json")[..],
             &include_bytes!("../../../examples/services.netrace/project.json")[..],
+            &include_bytes!("../../../examples/nat.netrace/project.json")[..],
         ] {
             let p = Project::from_json(bytes).unwrap();
             assert!(!p.devices().is_empty());

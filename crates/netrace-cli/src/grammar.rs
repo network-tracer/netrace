@@ -192,6 +192,18 @@ pub(crate) const COMMANDS: &[Command] = &[
         Devices::Switch
     ),
     cmd!(
+        "show-nat-translations",
+        "show ip nat translations [verbose]",
+        EXEC,
+        Devices::Router
+    ),
+    cmd!(
+        "show-nat-statistics",
+        "show ip nat statistics",
+        EXEC,
+        Devices::Router
+    ),
+    cmd!(
         "show-dhcp-binding",
         "show ip dhcp binding",
         EXEC,
@@ -807,6 +819,83 @@ pub(crate) const COMMANDS: &[Command] = &[
         Devices::Any,
         &["Comment up to 100 characters"]
     ),
+    // NAT
+    cmd!("nat-side", "ip nat inside", IF, Devices::Router),
+    cmd!("nat-side", "ip nat outside", IF, Devices::Router),
+    cmd!("no-nat-side", "no ip nat inside", IF, Devices::Router),
+    cmd!("no-nat-side", "no ip nat outside", IF, Devices::Router),
+    cmd!(
+        "nat-pool",
+        "ip nat pool WORD A.B.C.D A.B.C.D netmask A.B.C.D",
+        CONFIG,
+        Devices::Router,
+        &[
+            "Pool name",
+            "Start IP address",
+            "End IP address",
+            "Network mask"
+        ]
+    ),
+    cmd!(
+        "nat-pool",
+        "ip nat pool WORD A.B.C.D A.B.C.D prefix-length <1-32>",
+        CONFIG,
+        Devices::Router,
+        &[
+            "Pool name",
+            "Start IP address",
+            "End IP address",
+            "Prefix length"
+        ]
+    ),
+    cmd!(
+        "no-nat-pool",
+        "no ip nat pool WORD [LINE]",
+        CONFIG,
+        Devices::Router,
+        &["Pool name"]
+    ),
+    cmd!(
+        "nat-static",
+        "ip nat inside source static A.B.C.D A.B.C.D",
+        CONFIG,
+        Devices::Router,
+        &["Inside local IP address", "Inside global IP address"]
+    ),
+    cmd!(
+        "no-nat-static",
+        "no ip nat inside source static A.B.C.D A.B.C.D",
+        CONFIG,
+        Devices::Router,
+        &["Inside local IP address", "Inside global IP address"]
+    ),
+    cmd!(
+        "nat-list-pool",
+        "ip nat inside source list WORD pool WORD [overload]",
+        CONFIG,
+        Devices::Router,
+        &[
+            "Access list number or name",
+            "Name pool of global addresses"
+        ]
+    ),
+    cmd!(
+        "nat-list-iface",
+        "ip nat inside source list WORD interface IFACE [overload]",
+        CONFIG,
+        Devices::Router,
+        &[
+            "Access list number or name",
+            "Interface whose address is used"
+        ]
+    ),
+    cmd!(
+        "no-nat-list",
+        "no ip nat inside source list WORD [LINE]",
+        CONFIG,
+        Devices::Router,
+        &["Access list number or name"]
+    ),
     cmd!("cdp-run", "cdp run", CONFIG),
     cmd!("no-cdp-run", "no cdp run", CONFIG),
     cmd!("lldp-run", "lldp run", CONFIG),
@@ -955,6 +1044,18 @@ pub(crate) fn keyword_help(keyword: &str, ctx: Ctx) -> &'static str {
         "deny" => "Specify packets to reject",
         "remark" => "Access list entry comment",
         "in" => "inbound packets",
+        "nat" => "NAT configuration commands / IP NAT information",
+        "inside" => "Inside address translation / Inside interface for address translation",
+        "outside" => "Outside interface for address translation",
+        "source" => "Source address translation",
+        "static" => "Specify static local->global mapping",
+        "list" => "Specify access list describing local addresses",
+        "overload" => "Overload an address translation",
+        "netmask" => "Specify the network mask",
+        "prefix-length" => "Specify the prefix length",
+        "translations" => "Translation entries",
+        "statistics" => "Translation statistics",
+        "verbose" => "Display extra information",
         "out" => "outbound packets",
         "login" => "Enable password checking",
         "logging" => "Modify message logging facilities",

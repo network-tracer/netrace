@@ -503,6 +503,10 @@ private struct PacketInspector: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
 
+                    if let nat = event.nat {
+                        NatDecisionView(decision: nat, device: device?.name ?? "the router")
+                    }
+
                     if let acl = event.acl {
                         AclDecisionView(decision: acl)
                     }
@@ -1114,6 +1118,80 @@ private struct ProjectInspector: View {
             Spacer()
             Text(date).font(Theme.Font.caption).foregroundStyle(Theme.Palette.textTertiary)
         }
+    }
+}
+
+/// What NAT did at this hop: the addresses before and after, side by side,
+/// with the changed ones highlighted, and the rule that did it.
+private struct NatDecisionView: View {
+    let decision: NatDecisionInfo
+    let device: String
+
+    private var title: String {
+        guard decision.translated else { return "NAT at \(device): not translated" }
+        return decision.direction == "inside-to-outside"
+            ? "NAT at \(device): inside → outside"
+            : "NAT at \(device): outside → inside"
+    }
+
+    var body: some View {
+        InspectorSection(title) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                row("Source", decision.beforeSrc, decision.afterSrc)
+                row("Destination", decision.beforeDst, decision.afterDst)
+            }
+            .padding(Theme.Spacing.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: Theme.Radius.m, style: .continuous))
+            if let rule = decision.rule {
+                Text(rule)
+                    .font(Theme.Font.monoSmall)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            Label(status.0, systemImage: status.1)
+                .font(Theme.Font.labelSemibold)
+                .foregroundStyle(decision.translated ? Theme.Palette.textPrimary : Theme.Palette.statusWarning)
+        }
+    }
+
+    private var status: (String, String) {
+        if !decision.translated { return ("Sent untranslated", "exclamationmark.triangle.fill") }
+        return decision.created
+            ? ("New translation created", "plus.circle.fill")
+            : ("Existing translation used", "arrow.triangle.2.circlepath")
+    }
+
+    /// "Source" over "before → after", the rewritten address highlighted.
+    private func row(_ label: String, _ before: String, _ after: String) -> some View {
+        let changed = before != after
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textTertiary)
+            if changed {
+                HStack(spacing: Theme.Spacing.xs) {
+                    Text(before)
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .strikethrough(color: Theme.Palette.textTertiary)
+                    Image(systemName: "arrow.right")
+                        .foregroundStyle(Theme.Palette.textTertiary)
+                    Text(after)
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .padding(.horizontal, 4)
+                        .background(Color(light: 0x1F8A9E, dark: 0x3AAFC4).opacity(0.18),
+                                    in: RoundedRectangle(cornerRadius: 4))
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            } else {
+                Text("\(before) (unchanged)")
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .font(Theme.Font.monoSmall)
     }
 }
 

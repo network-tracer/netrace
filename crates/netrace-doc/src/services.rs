@@ -294,6 +294,101 @@ impl AccessList {
     }
 }
 
+/// Which side of the translation an interface is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NatSide {
+    Inside,
+    Outside,
+}
+
+impl NatSide {
+    pub fn ios(self) -> &'static str {
+        match self {
+            NatSide::Inside => "inside",
+            NatSide::Outside => "outside",
+        }
+    }
+}
+
+/// `ip nat pool NAME START END netmask M`: public addresses to hand out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NatPool {
+    pub name: String,
+    pub start: Ipv4Addr,
+    pub end: Ipv4Addr,
+    pub prefix_len: u8,
+}
+
+impl NatPool {
+    /// Every address in the pool, in order.
+    pub fn addresses(&self) -> impl Iterator<Item = Ipv4Addr> {
+        (u32::from(self.start)..=u32::from(self.end)).map(Ipv4Addr::from)
+    }
+
+    pub fn contains(&self, ip: Ipv4Addr) -> bool {
+        (u32::from(self.start)..=u32::from(self.end)).contains(&u32::from(ip))
+    }
+
+    pub fn config_line(&self) -> String {
+        format!(
+            "ip nat pool {} {} {} netmask {}",
+            self.name,
+            self.start,
+            self.end,
+            crate::mask(self.prefix_len)
+        )
+    }
+}
+
+/// Where dynamic translations take their public address from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NatTarget {
+    Pool(String),
+    /// The address of an (outside) interface, by full name.
+    Interface(String),
+}
+
+/// `ip nat inside source ...`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NatRule {
+    /// `static LOCAL GLOBAL`: always the same public address, both ways.
+    Static { local: Ipv4Addr, global: Ipv4Addr },
+    /// `list ACL pool NAME | interface X [overload]`: addresses the list
+    /// permits get a public address when they first send something.
+    Dynamic {
+        acl: String,
+        target: NatTarget,
+        overload: bool,
+    },
+}
+
+impl NatRule {
+    /// The rule as the running-config writes it (`interface` with the
+    /// full name, as IOS does).
+    pub fn config_line(&self) -> String {
+        match self {
+            NatRule::Static { local, global } => {
+                format!("ip nat inside source static {local} {global}")
+            }
+            NatRule::Dynamic {
+                acl,
+                target,
+                overload,
+            } => {
+                let target = match target {
+                    NatTarget::Pool(p) => format!("pool {p}"),
+                    NatTarget::Interface(i) => format!("interface {i}"),
+                };
+                let overload = if *overload { " overload" } else { "" };
+                format!("ip nat inside source list {acl} {target}{overload}")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +425,26 @@ mod tests {
             icmp: Some(IcmpMatch::Echo),
         };
         assert_eq!(e.ios(AclKind::Extended), "deny icmp host 10.0.0.5 any echo");
+        let pat = NatRule::Dynamic {
+            acl: "1".into(),
+            target: NatTarget::Interface("GigabitEthernet0/1".into()),
+            overload: true,
+        };
+        assert_eq!(
+            pat.config_line(),
+            "ip nat inside source list 1 interface GigabitEthernet0/1 overload"
+        );
+        let pool = NatPool {
+            name: "PUB".into(),
+            start: "203.0.113.10".parse().unwrap(),
+            end: "203.0.113.12".parse().unwrap(),
+            prefix_len: 24,
+        };
+        assert_eq!(pool.addresses().count(), 3);
+        assert_eq!(
+            pool.config_line(),
+            "ip nat pool PUB 203.0.113.10 203.0.113.12 netmask 255.255.255.0"
+        );
         assert_eq!(
             AclEntry {
                 protocol: AclProtocol::Ip,

@@ -147,6 +147,21 @@ final class SnippetStore: ObservableObject {
             interface {{Interface=g0/0}}
              ip access-group {{Number=101}} {{Direction=in}}
             """, isBuiltIn: true),
+        Snippet(name: "NAT overload (PAT)", body: """
+            access-list {{List=1}} permit {{Inside network=192.168.1.0}} {{Wildcard=0.0.0.255}}
+            ip nat inside source list {{List=1}} interface {{Outside interface=g0/1}} overload
+            interface {{Inside interface=g0/0}}
+             ip nat inside
+            interface {{Outside interface=g0/1}}
+             ip nat outside
+            """, isBuiltIn: true),
+        Snippet(name: "Static NAT", body: """
+            ip nat inside source static {{Inside local}} {{Inside global}}
+            interface {{Inside interface=g0/0}}
+             ip nat inside
+            interface {{Outside interface=g0/1}}
+             ip nat outside
+            """, isBuiltIn: true),
         Snippet(name: "Switch management address", body: """
             interface vlan 1
              ip address {{Address}} {{Mask=255.255.255.0}}

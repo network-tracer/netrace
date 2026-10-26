@@ -196,8 +196,21 @@ struct LinksLayer: View {
         }
     }
 
-    /// A shield for an access list (in or out), an arrow for a DHCP relay.
+    /// A shield for an access list (in or out), an arrow for a DHCP relay,
+    /// IN / OUT for the NAT side.
     static func drawServiceBadge(_ badge: ServiceBadge, at p: CGPoint, in context: inout GraphicsContext) {
+        if badge.kind.hasPrefix("nat-") {
+            let outside = badge.kind == "nat-outside"
+            let rect = CGRect(x: p.x - 9, y: p.y - 9, width: 18, height: 18)
+            context.fill(Path(ellipseIn: rect), with: .color(Theme.Palette.canvas))
+            context.fill(Path(ellipseIn: rect.insetBy(dx: 1, dy: 1)),
+                         with: .color(Color(light: 0x1F8A9E, dark: 0x3AAFC4)))
+            let text = context.resolve(Text(outside ? "OUT" : "IN")
+                .font(.system(size: outside ? 6 : 7, weight: .heavy))
+                .foregroundStyle(.white))
+            context.draw(text, at: p)
+            return
+        }
         let (symbol, color): (String, Color) = switch badge.kind {
         case "acl-in": ("shield.lefthalf.filled", Theme.Palette.statusWarning)
         case "acl-out": ("shield.righthalf.filled", Theme.Palette.statusWarning)

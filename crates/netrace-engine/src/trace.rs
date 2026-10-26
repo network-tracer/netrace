@@ -106,4 +106,6 @@ pub struct TraceEvent {
     pub session: Option<u64>,
     /// The access list this device checked, and its verdict.
     pub acl: Option<crate::AclDecision>,
+    /// What NAT rewrote at this hop (or why it didn't).
+    pub nat: Option<crate::NatDecision>,
 }

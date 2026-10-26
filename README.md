@@ -20,6 +20,7 @@ make lint    # rustfmt + clippy
 ```
 
 Open `examples/services.netrace` for a DHCP and access list lab,
+`examples/nat.netrace` for NAT and PAT,
 `examples/vlans.netrace` for a VLAN, trunk and router-on-a-stick lab
 (with a redundant link spanning tree blocks), `examples/two-lans.netrace` to
 configure a router in its console and route between two LANs, `examples/office-lan.netrace` to try the simulation

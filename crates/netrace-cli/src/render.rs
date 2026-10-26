@@ -221,6 +221,9 @@ pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig
         if let Some(acl) = &iface.acl_out {
             let _ = writeln!(out, " ip access-group {acl} out");
         }
+        if let Some(side) = iface.nat {
+            let _ = writeln!(out, " ip nat {}", side.ios());
+        }
         if router && kind.has_port(&name) {
             out += " duplex auto\n speed auto\n";
         }
@@ -236,6 +239,12 @@ pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig
         out += "ip forward-protocol nd\n!\nno ip http server\n!\n";
     } else {
         out += "ip http server\nip http secure-server\n!\n";
+    }
+    for pool in &config.nat_pools {
+        let _ = writeln!(out, "{}", pool.config_line());
+    }
+    for rule in &config.nat_rules {
+        let _ = writeln!(out, "{}", rule.config_line());
     }
     for route in &config.routes {
         let target = match &route.target {

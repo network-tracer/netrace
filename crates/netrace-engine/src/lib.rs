@@ -15,6 +15,7 @@ mod dhcp;
 mod explain;
 mod frame;
 mod mac;
+mod nat;
 mod network;
 mod probe;
 mod report;
@@ -34,6 +35,7 @@ pub use frame::{
     Ipv4Packet, L4, Payload, Protocol, Udp, Unreachable,
 };
 pub use mac::MacAddr;
+pub use nat::{NatDecision, NatDirection, NatEntry, NatKind, NatProto};
 pub use network::{EngineError, HOP_LATENCY, Network};
 pub use probe::{
     MAX_HOPS, PROBES_PER_HOP, PingFailure, PingSession, Probe, ProbeResult, ReportStyle,

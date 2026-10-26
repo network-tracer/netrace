@@ -8,6 +8,7 @@ use netrace_sim::SimTime;
 
 use crate::acl::{AclDecision, AclDirection};
 use crate::explain;
+use crate::nat::NatOutcome;
 use crate::network::{ARP_TIMEOUT, Arrival, Event, session_of};
 use crate::probe::ProbeResult;
 use crate::stack::{Iface, Route, RouteSource, Stack, StackKind, Waiting};
@@ -158,6 +159,14 @@ impl Network {
                     }
                     self.pending_acl = Some(decision);
                 }
+                // NAT outside → inside comes before routing, so a reply to an
+                // inside global address is turned back into the inside host's.
+                let packet = if stack.kind == StackKind::Router {
+                    self.nat_outside_in(now, id, &iface, &packet)
+                        .unwrap_or(packet)
+                } else {
+                    packet
+                };
                 // Broadcast DHCP is for every device on the link (servers, relays, clients).
                 let broadcast =
                     packet.dst == std::net::Ipv4Addr::BROADCAST && packet.udp().is_some();
@@ -219,7 +228,9 @@ impl Network {
         let name = self.name(id);
         let port = abbreviate_port(&arrival.port);
         let mine = iface.address.is_some_and(|a| a.address == arp.target_ip);
-        if !mine {
+        let alias =
+            !mine && stack.kind == StackKind::Router && self.nat_alias(id, iface, arp.target_ip);
+        if !mine && !alias {
             let why = match (stack.kind, iface.address) {
                 (StackKind::Host, Some(a)) => format!(
                     "it asks for {}, not {name}'s address {}",
@@ -266,14 +277,13 @@ impl Network {
             );
             return;
         }
-        let addr = iface.address.expect("checked above");
         if let Some(s) = self.stack_mut(id) {
             s.learn(arp.sender_ip, arp.sender_mac, &iface.name, now);
         }
         let reply = ArpPacket {
             op: ArpOp::Reply,
             sender_mac: iface.mac,
-            sender_ip: addr.address,
+            sender_ip: arp.target_ip,
             target_mac: arp.sender_mac,
             target_ip: arp.sender_ip,
         };
@@ -291,18 +301,35 @@ impl Network {
             explain::data_link(LayerRole::Used, accepted, &frame),
             explain::arp(
                 LayerRole::Used,
-                format!(
-                    "{} is {name}'s address, so it answers, and remembers {} is at {}.",
-                    arp.target_ip, arp.sender_ip, arp.sender_mac
-                ),
+                if alias {
+                    format!(
+                        "{} is one of {name}'s NAT inside global addresses, so it answers for it, and remembers {} \
+                         is at {}.",
+                        arp.target_ip, arp.sender_ip, arp.sender_mac
+                    )
+                } else {
+                    format!(
+                        "{} is {name}'s address, so it answers, and remembers {} is at {}.",
+                        arp.target_ip, arp.sender_ip, arp.sender_mac
+                    )
+                },
                 &arp,
             ),
         ];
-        let summary = format!(
-            "{name} owns {}. It notes that {} is at {}, then replies directly to that MAC with its own \
-             address: \"{} is at {}.\"",
-            arp.target_ip, arp.sender_ip, arp.sender_mac, addr.address, iface.mac
-        );
+        let summary = if alias {
+            format!(
+                "{} isn't on any interface, but it's an inside global address in {name}'s NAT setup, so {name} \
+                 answers for it: \"{} is at {}.\" Traffic for it now reaches {name}, which translates it to the \
+                 inside host.",
+                arp.target_ip, arp.target_ip, iface.mac
+            )
+        } else {
+            format!(
+                "{name} owns {}. It notes that {} is at {}, then replies directly to that MAC with its own \
+                 address: \"{} is at {}.\"",
+                arp.target_ip, arp.sender_ip, arp.sender_mac, arp.target_ip, iface.mac
+            )
+        };
         self.record(
             now,
             id,
@@ -499,6 +526,51 @@ impl Network {
                     .map(|sent| now - sent)
                     .unwrap_or_default();
                 let reporter = self.who_ip(packet.src);
+                // The error is about a packet this device sent for someone
+                // else's ping (an echo reply that couldn't get back): report
+                // it, but it isn't this device's ping to settle.
+                let pinger = session
+                    .and_then(|s| self.sessions.get(s as usize))
+                    .map(|s| s.source)
+                    .filter(|source| *source != id);
+                if let Some(pinger) = pinger {
+                    let what = match icmp.kind {
+                        IcmpKind::TimeExceeded => "ICMP Time Exceeded",
+                        _ => "ICMP Destination Unreachable",
+                    };
+                    let layers = vec![
+                        arrived,
+                        explain::data_link(LayerRole::Used, accepted, &frame),
+                        explain::ipv4(
+                            LayerRole::Used,
+                            format!("Addressed to {name}, from {}.", packet.src),
+                            &packet,
+                        ),
+                        explain::icmp(
+                            LayerRole::Used,
+                            "An error about a packet this device sent.",
+                            &icmp,
+                        ),
+                    ];
+                    let summary = format!(
+                        "{name} receives {what} from {reporter}: its reply to {} couldn't be delivered, so {} \
+                         never gets an answer.",
+                        self.name(pinger),
+                        self.name(pinger)
+                    );
+                    self.record(
+                        now,
+                        id,
+                        Some(&arrival),
+                        Some(frame),
+                        Outcome::Completed,
+                        summary,
+                        layers,
+                        Vec::new(),
+                    );
+                    self.set_session(session);
+                    return;
+                }
                 let (note, summary, result) = match icmp.kind {
                     IcmpKind::TimeExceeded => {
                         let ttl = probe.map(|p| p.ttl).unwrap_or(0);
@@ -654,14 +726,22 @@ impl Network {
             return;
         };
         let (route, out_iface) = (route.clone(), out_iface.clone());
-        let out = Ipv4Packet {
-            ttl: packet.ttl - 1,
-            ..packet
-        };
         let because = describe_route(&route, packet.dst);
         let o = abbreviate_port(&out_iface.name);
-        // Outbound access list on the exit interface.
-        if let Some(decision) = self.check_acl(id, &out_iface, AclDirection::Out, &packet) {
+        // NAT inside → outside happens after routing, before the outbound ACL.
+        let translated = match self.nat_inside_out(now, id, stack, in_iface, &out_iface, &packet) {
+            NatOutcome::Translated(p) => p,
+            NatOutcome::Exhausted => {
+                return self.nat_drop(now, id, stack, in_iface, arrival, frame, packet);
+            }
+            NatOutcome::Untouched | NatOutcome::NotCovered => packet,
+        };
+        let out = Ipv4Packet {
+            ttl: packet.ttl - 1,
+            ..translated
+        };
+        // Outbound access list on the exit interface (it sees the translated packet).
+        if let Some(decision) = self.check_acl(id, &out_iface, AclDirection::Out, &translated) {
             if !decision.permitted {
                 return self.acl_drop(now, id, stack, &out_iface, arrival, frame, packet, decision);
             }
@@ -680,6 +760,33 @@ impl Network {
                 )
             })
             .unwrap_or_default();
+        let nat = self
+            .pending_nat
+            .as_ref()
+            .filter(|n| n.device == id)
+            .cloned();
+        let nat_note = nat
+            .as_ref()
+            .map(|n| format!(" NAT: {}", n.note))
+            .unwrap_or_default();
+        let ip_note = match &nat {
+            Some(n) if n.translated => {
+                let (what, before, after) = if n.before_src != n.after_src {
+                    ("source", &n.before_src, &n.after_src)
+                } else {
+                    ("destination", &n.before_dst, &n.after_dst)
+                };
+                format!(
+                    "Read the destination {} to choose a route. NAT rewrote the {what} {before} → {after}; TTL \
+                     lowered from {} to {}.",
+                    packet.dst, packet.ttl, out.ttl
+                )
+            }
+            _ => format!(
+                "Read the destination {} to choose a route. Addresses stay the same; TTL lowered from {} to {}.",
+                packet.dst, packet.ttl, out.ttl
+            ),
+        };
 
         if let Some(entry) = stack.arp.get(&next_hop) {
             let new_frame = Frame {
@@ -700,19 +807,12 @@ impl Network {
                     ),
                     &new_frame,
                 ),
-                explain::ipv4(
-                    LayerRole::Changed,
-                    format!(
-                        "Read the destination {} to choose a route. Addresses stay the same; TTL lowered from {} to {}.",
-                        packet.dst, packet.ttl, out.ttl
-                    ),
-                    &out,
-                ),
+                explain::ipv4(LayerRole::Changed, ip_note, &out),
                 explain::not_used(Layer::Message, "Carried along untouched."),
             ];
             let summary = format!(
                 "{name} routes the packet for {}: {because}. It lowers the TTL to {}, puts a new Ethernet header \
-                 on it (from its {o} to {}), and sends it out {o}.{acl_note}",
+                 on it (from its {o} to {}), and sends it out {o}.{acl_note}{nat_note}",
                 packet.dst,
                 out.ttl,
                 self.who_ip(next_hop)
@@ -865,6 +965,63 @@ impl Network {
                 IcmpKind::Unreachable(Unreachable::Prohibited),
             );
         }
+    }
+
+    /// A packet NAT should translate but can't (no free address): dropped,
+    /// with ICMP host unreachable back to the sender.
+    #[allow(clippy::too_many_arguments)]
+    fn nat_drop(
+        &mut self,
+        now: SimTime,
+        id: DeviceId,
+        stack: &Stack,
+        in_iface: &Iface,
+        arrival: Arrival,
+        frame: Frame,
+        packet: Ipv4Packet,
+    ) {
+        let name = self.name(id);
+        let session = session_of(&packet);
+        let note = self
+            .pending_nat
+            .as_ref()
+            .map(|n| n.note.clone())
+            .unwrap_or_default();
+        let layers = vec![
+            explain::physical(format!("Arrived on {}.", abbreviate_port(&arrival.port))),
+            explain::data_link(LayerRole::Used, "Read and passed up for routing.", &frame),
+            explain::ipv4(
+                LayerRole::Used,
+                format!(
+                    "Source {} needs a translation, and none is free.",
+                    packet.src
+                ),
+                &packet,
+            ),
+            explain::not_used(Layer::Message, "Dropped with the packet."),
+        ];
+        self.record(
+            now,
+            id,
+            Some(&arrival),
+            Some(frame),
+            Outcome::Dropped,
+            format!(
+                "{name} can't translate the packet from {}: {note}",
+                packet.src
+            ),
+            layers,
+            Vec::new(),
+        );
+        self.set_session(session);
+        self.send_error(
+            now,
+            id,
+            stack,
+            in_iface,
+            packet,
+            IcmpKind::Unreachable(Unreachable::Host),
+        );
     }
 
     /// ICMP error back to the packet's source (never about another error).

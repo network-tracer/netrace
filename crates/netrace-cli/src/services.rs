@@ -5,7 +5,7 @@ use std::net::Ipv4Addr;
 
 use netrace_doc::{
     AccessList, AclAction, AclAddress, AclEntry, AclKind, AclProtocol, Device, DeviceKind,
-    DhcpPool, IcmpMatch, PortMatch, Project,
+    DhcpPool, IcmpMatch, NatPool, NatRule, NatSide, NatTarget, PortMatch, Project,
 };
 use netrace_engine::Network;
 
@@ -285,7 +285,127 @@ impl Session {
                 String::new()
             }
 
+            // NAT
+            "nat-side" | "no-nat-side" => {
+                let side = if keywords.contains(&"inside") {
+                    NatSide::Inside
+                } else {
+                    NatSide::Outside
+                };
+                let names = self.interface_names();
+                let set = id == "nat-side";
+                self.update(project, |c| {
+                    for n in &names {
+                        let i = c.interface_mut(kind, n);
+                        if set {
+                            i.nat = Some(side);
+                        } else if i.nat == Some(side) {
+                            i.nat = None;
+                        }
+                    }
+                });
+                String::new()
+            }
+            "nat-pool" => {
+                let name = words.first()?.clone();
+                let (start, end) = (ips[0], ips[1]);
+                let prefix_len = match ips.get(2) {
+                    Some(mask) => match netrace_doc::prefix_from_mask(*mask) {
+                        Some(p) => p,
+                        None => return Some(format!("%Pool {name} mask {mask} is invalid.")),
+                    },
+                    None => nums.first().copied().unwrap_or(24) as u8,
+                };
+                if u32::from(end) < u32::from(start) {
+                    return Some(format!(
+                        "%End address less than start address in pool {name}"
+                    ));
+                }
+                let m = u32::from(netrace_doc::mask(prefix_len));
+                if u32::from(start) & m != u32::from(end) & m {
+                    return Some(format!(
+                        "%Start and end addresses on different subnets in pool {name}"
+                    ));
+                }
+                self.update(project, |c| {
+                    c.nat_pools.retain(|p| p.name != name);
+                    c.nat_pools.push(NatPool {
+                        name: name.clone(),
+                        start,
+                        end,
+                        prefix_len,
+                    });
+                });
+                String::new()
+            }
+            "no-nat-pool" => {
+                let name = words.first()?.clone();
+                let in_use = device.config.nat_rules.iter().any(|r| {
+                    matches!(r, NatRule::Dynamic { target: NatTarget::Pool(p), .. } if *p == name)
+                });
+                if in_use {
+                    return Some(format!("%Pool {name} in use, cannot destroy"));
+                }
+                self.update(project, |c| c.nat_pools.retain(|p| p.name != name));
+                String::new()
+            }
+            "nat-static" | "no-nat-static" => {
+                let (local, global) = (ips[0], ips[1]);
+                if id == "nat-static"
+                    && device.config.nat_rules.iter().any(|r| {
+                        matches!(r, NatRule::Static { local: l, global: g } if (*l == local) != (*g == global))
+                    })
+                {
+                    return Some(format!(
+                        "% {local} or {global} already has a different static mapping"
+                    ));
+                }
+                self.update(project, |c| {
+                    c.nat_rules.retain(|r| {
+                        !matches!(r, NatRule::Static { local: l, global: g } if *l == local && *g == global)
+                    });
+                    if id == "nat-static" {
+                        c.nat_rules.push(NatRule::Static { local, global });
+                    }
+                });
+                String::new()
+            }
+            "nat-list-pool" | "nat-list-iface" => {
+                let acl = words.first()?.clone();
+                let target = if id == "nat-list-pool" {
+                    NatTarget::Pool(words.get(1)?.clone())
+                } else {
+                    NatTarget::Interface(values.iter().find_map(|v| match v {
+                        Value::Iface(n) => Some(n.clone()),
+                        _ => None,
+                    })?)
+                };
+                let overload = keywords.contains(&"overload");
+                self.update(project, |c| {
+                    c.nat_rules
+                        .retain(|r| !matches!(r, NatRule::Dynamic { acl: a, .. } if *a == acl));
+                    c.nat_rules.push(NatRule::Dynamic {
+                        acl: acl.clone(),
+                        target: target.clone(),
+                        overload,
+                    });
+                });
+                String::new()
+            }
+            "no-nat-list" => {
+                let acl = words.first()?.clone();
+                self.update(project, |c| {
+                    c.nat_rules
+                        .retain(|r| !matches!(r, NatRule::Dynamic { acl: a, .. } if *a == acl))
+                });
+                String::new()
+            }
+
             // show
+            "show-nat-translations" => {
+                nat_translations(network, &device, keywords.contains(&"verbose"))
+            }
+            "show-nat-statistics" => nat_statistics(network, &device),
             "show-dhcp-binding" => dhcp_bindings(network, &device),
             "show-dhcp-pool" => dhcp_pools(network, &device),
             "show-acls" | "show-ip-acls" => {
@@ -534,6 +654,122 @@ fn access_lists(network: &Network, device: &Device, only: Option<&str>) -> Strin
                 .map(|n| format!(" ({n} match{})", if *n == 1 { "" } else { "es" }))
                 .unwrap_or_default();
             let _ = writeln!(out, "    {} {}{matches}", e.sequence, e.ios(acl.kind));
+        }
+    }
+    out
+}
+
+/// `show ip nat translations`.
+fn nat_translations(network: &Network, device: &Device, verbose: bool) -> String {
+    let rows = network.nat_translations(device.id);
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "Pro  Inside global         Inside local          Outside local         Outside global\n",
+    );
+    for e in &rows {
+        let proto = e.proto.map(|p| p.ios()).unwrap_or("---");
+        let outside = e.outside_addr();
+        let _ = writeln!(
+            out,
+            "{proto:<4} {:<21} {:<21} {outside:<21} {outside}",
+            e.inside_global(),
+            e.inside_local()
+        );
+        if verbose {
+            let kind = match e.kind {
+                netrace_engine::NatKind::Static => "static",
+                netrace_engine::NatKind::Dynamic => "dynamic",
+                netrace_engine::NatKind::Overload => "extended",
+            };
+            let _ = writeln!(
+                out,
+                "  create {:.3}s, flags: {kind}\n  rule: {}",
+                e.created.as_millis() as f64 / 1000.0,
+                e.rule
+            );
+        }
+    }
+    out
+}
+
+/// `show ip nat statistics`.
+fn nat_statistics(network: &Network, device: &Device) -> String {
+    let rows = network.nat_translations(device.id);
+    let statics = rows
+        .iter()
+        .filter(|e| e.kind == netrace_engine::NatKind::Static && e.proto.is_none())
+        .count();
+    let extended = rows.iter().filter(|e| e.proto.is_some()).count();
+    let mut out = format!(
+        "Total active translations: {} ({statics} static, {} dynamic; {extended} extended)\n",
+        rows.len(),
+        rows.len() - statics
+    );
+    let sides = |side: NatSide| -> String {
+        device
+            .config
+            .interfaces
+            .iter()
+            .filter(|(_, i)| i.nat == Some(side))
+            .map(|(n, _)| format!("  {n}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let _ = writeln!(out, "Outside interfaces:\n{}", sides(NatSide::Outside));
+    let _ = writeln!(out, "Inside interfaces:\n{}", sides(NatSide::Inside));
+    let (hits, misses) = network.nat_hits(device.id);
+    let _ = writeln!(out, "Hits: {hits}  Misses: {misses}");
+    out += "Dynamic mappings:\n";
+    let dynamic: Vec<_> = device
+        .config
+        .nat_rules
+        .iter()
+        .filter(|r| matches!(r, NatRule::Dynamic { .. }))
+        .collect();
+    if !dynamic.is_empty() {
+        out += "-- Inside Source\n";
+    }
+    for (n, rule) in dynamic.iter().enumerate() {
+        let NatRule::Dynamic {
+            acl,
+            target,
+            overload,
+        } = rule
+        else {
+            continue;
+        };
+        let refcount = rows
+            .iter()
+            .filter(|e| e.kind != netrace_engine::NatKind::Static && e.rule == rule.config_line())
+            .count();
+        let target_text = match target {
+            NatTarget::Pool(p) => format!("pool {p}"),
+            NatTarget::Interface(i) => format!("interface {i}"),
+        };
+        let _ = writeln!(
+            out,
+            "[Id: {}] access-list {acl} {target_text}{} refcount {refcount}",
+            n + 1,
+            if *overload { " overload" } else { "" }
+        );
+        if let NatTarget::Pool(p) = target
+            && let Some(pool) = device.config.nat_pool(p)
+        {
+            let total = pool.addresses().count();
+            let allocated = rows
+                .iter()
+                .filter(|e| e.proto.is_none() && pool.contains(e.global))
+                .count();
+            let _ = writeln!(
+                out,
+                " pool {p}: netmask {}\n\tstart {} end {}\n\ttype generic, total addresses {total}, allocated {allocated} ({}%), misses 0",
+                netrace_doc::mask(pool.prefix_len),
+                pool.start,
+                pool.end,
+                allocated * 100 / total.max(1)
+            );
         }
     }
     out

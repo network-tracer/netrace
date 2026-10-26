@@ -28,7 +28,7 @@ pub use project::{
 };
 pub use services::{
     AccessList, AclAction, AclAddress, AclEntry, AclKind, AclProtocol, DhcpPool, IcmpMatch,
-    PortMatch, port_name,
+    NatPool, NatRule, NatSide, NatTarget, PortMatch, port_name,
 };
 pub use style::{GroupId, LinePattern, ShapeKind, ShapeStyle, Swatch};
 pub use switching::{

@@ -9,7 +9,10 @@ use std::net::Ipv4Addr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AccessList, DeviceKind, DhcpPool, DocError, StpConfig, SwitchportConfig, VlanConfig};
+use crate::{
+    AccessList, DeviceKind, DhcpPool, DocError, NatPool, NatRule, NatSide, StpConfig,
+    SwitchportConfig, VlanConfig,
+};
 
 /// An address and prefix configured on an interface (`ip address A M`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -72,6 +75,9 @@ pub struct InterfaceConfig {
     /// `ip access-group X out`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acl_out: Option<String>,
+    /// `ip nat inside` / `ip nat outside`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nat: Option<NatSide>,
 }
 
 /// Where a static route sends traffic.
@@ -162,6 +168,11 @@ pub struct DeviceConfig {
     pub dhcp_excluded: Vec<(Ipv4Addr, Ipv4Addr)>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub access_lists: Vec<AccessList>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub nat_pools: Vec<NatPool>,
+    /// `ip nat inside source ...`, in the order typed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub nat_rules: Vec<NatRule>,
 }
 
 fn is_true(value: &bool) -> bool {
@@ -188,6 +199,8 @@ impl Default for DeviceConfig {
             dhcp_pools: Vec::new(),
             dhcp_excluded: Vec::new(),
             access_lists: Vec::new(),
+            nat_pools: Vec::new(),
+            nat_rules: Vec::new(),
         }
     }
 }
@@ -210,6 +223,10 @@ impl DeviceConfig {
         self.access_lists
             .iter()
             .find(|a| a.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn nat_pool(&self, name: &str) -> Option<&NatPool> {
+        self.nat_pools.iter().find(|p| p.name == name)
     }
 
     pub fn dhcp_excluded(&self, ip: Ipv4Addr) -> bool {

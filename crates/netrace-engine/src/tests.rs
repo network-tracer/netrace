@@ -1538,3 +1538,299 @@ fn permitted_traffic_names_its_rule() {
         routed.summary
     );
 }
+
+use netrace_doc::{NatPool, NatRule, NatSide, NatTarget};
+
+/// Three PCs on SW1 (192.168.1.10–12) behind R1 Gi0/0 (inside); R1 Gi0/1
+/// 203.0.113.1/24 (outside) to the ISP router R2 (203.0.113.2), which has
+/// a server at 198.51.100.10 and no route to 192.168.1.0/24.
+fn nat_lab() -> (Project, DeviceId, DeviceId, [DeviceId; 3], DeviceId) {
+    let (mut p, sw, pc1, pc2, pc3) = office();
+    let r1 = p.add_device(DeviceKind::Router, Point::default()).id;
+    let r2 = p.add_device(DeviceKind::Router, Point::default()).id;
+    let server = host(&mut p, "198.51.100.10", "198.51.100.1");
+    p.connect(
+        end(sw, "GigabitEthernet0/1"),
+        end(r1, "GigabitEthernet0/0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        end(r1, "GigabitEthernet0/1"),
+        end(r2, "GigabitEthernet0/1"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.connect(
+        end(r2, "GigabitEthernet0/0"),
+        end(server, "FastEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    router_port(&mut p, r1, "GigabitEthernet0/0", "192.168.1.1", 24);
+    router_port(&mut p, r1, "GigabitEthernet0/1", "203.0.113.1", 24);
+    router_port(&mut p, r2, "GigabitEthernet0/1", "203.0.113.2", 24);
+    router_port(&mut p, r2, "GigabitEthernet0/0", "198.51.100.1", 24);
+    add_route(&mut p, r1, "0.0.0.0", 0, "203.0.113.2", 1);
+    (p, r1, r2, [pc1, pc2, pc3], server)
+}
+
+/// `ip nat inside` on Gi0/0, `ip nat outside` on Gi0/1, plus `rules`.
+fn nat(p: &mut Project, r: DeviceId, rules: Vec<NatRule>, pools: Vec<NatPool>) {
+    let mut config = p.device(r).unwrap().config.clone();
+    config
+        .interface_mut(DeviceKind::Router, "GigabitEthernet0/0")
+        .nat = Some(NatSide::Inside);
+    config
+        .interface_mut(DeviceKind::Router, "GigabitEthernet0/1")
+        .nat = Some(NatSide::Outside);
+    config.access_lists.push(AccessList {
+        name: "1".into(),
+        kind: AclKind::Standard,
+        entries: vec![entry(
+            10,
+            AclAction::Permit,
+            AclProtocol::Ip,
+            AclAddress {
+                address: ip("192.168.1.0"),
+                wildcard: ip("0.0.0.255"),
+            },
+            AclAddress::ANY,
+            None,
+        )],
+        remarks: vec![],
+    });
+    config.nat_rules = rules;
+    config.nat_pools = pools;
+    p.set_device_config(r, config).unwrap();
+}
+
+#[test]
+fn pat_lets_inside_hosts_share_one_address() {
+    let (mut p, r1, _, [pc1, pc2, _], _) = nat_lab();
+    // Without NAT the ISP has no way back to 192.168.1.0/24.
+    let mut net = Network::new(p.clone());
+    let s = net
+        .ping(pc1, ip("198.51.100.10"), 3, SimTime::ZERO)
+        .unwrap();
+    assert!(
+        !net.session_report(s)
+            .unwrap()
+            .contains("Reply from 198.51.100.10"),
+        "{}",
+        net.session_report(s).unwrap()
+    );
+    let unnat = net.trace().iter().find_map(|e| e.nat.as_ref()).is_none();
+    assert!(unnat, "no NAT configured, no NAT decisions");
+
+    nat(
+        &mut p,
+        r1,
+        vec![NatRule::Dynamic {
+            acl: "1".into(),
+            target: NatTarget::Interface("GigabitEthernet0/1".into()),
+            overload: true,
+        }],
+        vec![],
+    );
+    let mut net = Network::new(p.clone());
+    let s1 = net
+        .ping(pc1, ip("198.51.100.10"), 4, SimTime::ZERO)
+        .unwrap();
+    let s2 = net
+        .ping(pc2, ip("198.51.100.10"), 4, SimTime::from_secs(10))
+        .unwrap();
+    for s in [s1, s2] {
+        let report = net.session_report(s).unwrap();
+        assert!(report.contains("Reply from 198.51.100.10"), "{report}");
+    }
+    let created = net
+        .trace()
+        .iter()
+        .filter(|e| e.device == r1)
+        .find_map(|e| e.nat.as_ref().filter(|n| n.created))
+        .expect("a translation was created");
+    assert_eq!(created.direction, crate::NatDirection::InsideToOutside);
+    assert!(
+        created.before_src.starts_with("192.168.1.10:"),
+        "{created:?}"
+    );
+    assert!(created.after_src.starts_with("203.0.113.1:"), "{created:?}");
+    assert!(created.note.contains("overload (PAT)"), "{}", created.note);
+    assert!(
+        net.trace().iter().any(|e| e
+            .nat
+            .as_ref()
+            .is_some_and(|n| n.direction == crate::NatDirection::OutsideToInside
+                && n.after_dst.starts_with("192.168.1.10:"))),
+        "replies are translated back"
+    );
+    // Two hosts, one flow each, both on 203.0.113.1.
+    let table = net.nat_translations(r1);
+    assert_eq!(table.len(), 2, "{table:?}");
+    assert!(
+        table
+            .iter()
+            .all(|e| e.global == ip("203.0.113.1") && e.proto == Some(crate::NatProto::Icmp))
+    );
+    let (hits, misses) = net.nat_hits(r1);
+    assert_eq!(misses, 2);
+    assert!(hits > 4);
+}
+
+#[test]
+fn static_nat_lets_the_outside_reach_a_server() {
+    let (mut p, r1, _, [pc1, ..], server) = nat_lab();
+    nat(
+        &mut p,
+        r1,
+        vec![NatRule::Static {
+            local: ip("192.168.1.10"),
+            global: ip("203.0.113.5"),
+        }],
+        vec![],
+    );
+    let mut net = Network::new(p);
+    let s = net
+        .ping(server, ip("203.0.113.5"), 4, SimTime::ZERO)
+        .unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(report.contains("Reply from 203.0.113.5"), "{report}");
+    assert!(
+        net.trace()
+            .iter()
+            .any(|e| e.device == r1 && e.summary.contains("inside global address")),
+        "R1 answers ARP for the static global address"
+    );
+    let inbound = net
+        .trace()
+        .iter()
+        .find_map(|e| e.nat.as_ref().filter(|n| n.created))
+        .unwrap();
+    assert_eq!(inbound.direction, crate::NatDirection::OutsideToInside);
+    assert!(inbound.after_dst.starts_with("192.168.1.10:"));
+    // PC1's replies leave as 203.0.113.5 using the same translation.
+    assert!(net.trace().iter().any(|e| e.device == r1
+        && e.nat.as_ref().is_some_and(|n| !n.created
+            && n.direction == crate::NatDirection::InsideToOutside
+            && n.after_src.starts_with("203.0.113.5:"))));
+    let rows = net.nat_translations(r1);
+    assert_eq!(rows[0].inside_global(), "203.0.113.5");
+    assert_eq!(rows[0].outside_addr(), "---");
+    let _ = pc1;
+}
+
+#[test]
+fn a_pool_without_overload_runs_out() {
+    let (mut p, r1, _, [pc1, pc2, _], _) = nat_lab();
+    nat(
+        &mut p,
+        r1,
+        vec![NatRule::Dynamic {
+            acl: "1".into(),
+            target: NatTarget::Pool("PUB".into()),
+            overload: false,
+        }],
+        vec![NatPool {
+            name: "PUB".into(),
+            start: ip("203.0.113.10"),
+            end: ip("203.0.113.10"),
+            prefix_len: 24,
+        }],
+    );
+    let mut net = Network::new(p);
+    let s1 = net
+        .ping(pc1, ip("198.51.100.10"), 4, SimTime::ZERO)
+        .unwrap();
+    let s2 = net
+        .ping(pc2, ip("198.51.100.10"), 2, SimTime::from_secs(10))
+        .unwrap();
+    assert!(
+        net.session_report(s1)
+            .unwrap()
+            .contains("Reply from 198.51.100.10")
+    );
+    let report = net.session_report(s2).unwrap();
+    assert!(report.contains("Destination host unreachable"), "{report}");
+    let dropped = net
+        .trace()
+        .iter()
+        .find(|e| e.device == r1 && e.summary.contains("can't translate"))
+        .unwrap();
+    assert!(
+        dropped.summary.contains("already given"),
+        "{}",
+        dropped.summary
+    );
+    assert!(
+        net.nat_translations(r1)
+            .iter()
+            .any(|e| e.proto.is_none() && e.global == ip("203.0.113.10"))
+    );
+}
+
+#[test]
+fn hosts_the_nat_list_skips_leave_untranslated() {
+    let (mut p, r1, _, [pc1, ..], _) = nat_lab();
+    nat(
+        &mut p,
+        r1,
+        vec![NatRule::Dynamic {
+            acl: "2".into(),
+            target: NatTarget::Interface("GigabitEthernet0/1".into()),
+            overload: true,
+        }],
+        vec![],
+    );
+    let mut net = Network::new(p);
+    net.ping(pc1, ip("198.51.100.10"), 2, SimTime::ZERO)
+        .unwrap();
+    let n = net.trace().iter().find_map(|e| e.nat.as_ref()).unwrap();
+    assert!(!n.translated);
+    assert!(n.note.contains("access list 2 doesn't exist"), "{}", n.note);
+}
+
+#[test]
+fn the_nat_lab_works_as_its_note_says() {
+    let mut p =
+        Project::from_json(include_bytes!("../../../examples/nat.netrace/project.json")).unwrap();
+    let id = |p: &Project, name: &str| p.devices().iter().find(|d| d.name == name).unwrap().id;
+    let (r1, pc1, web) = (id(&p, "R1"), id(&p, "PC1"), id(&p, "WEB"));
+    let mut net = Network::new(p.clone());
+    let s = net
+        .ping(pc1, ip("198.51.100.10"), 3, SimTime::ZERO)
+        .unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(
+        !report.contains("Reply from") && report.contains("Lost = 3"),
+        "{report}"
+    );
+
+    nat(
+        &mut p,
+        r1,
+        vec![
+            NatRule::Dynamic {
+                acl: "1".into(),
+                target: NatTarget::Interface("GigabitEthernet0/1".into()),
+                overload: true,
+            },
+            NatRule::Static {
+                local: ip("192.168.1.20"),
+                global: ip("203.0.113.10"),
+            },
+        ],
+        vec![],
+    );
+    let mut net = Network::new(p);
+    let s = net
+        .ping(pc1, ip("198.51.100.10"), 3, SimTime::ZERO)
+        .unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(report.contains("Reply from 198.51.100.10"), "{report}");
+    let s = net
+        .ping(web, ip("203.0.113.10"), 3, SimTime::from_secs(10))
+        .unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(report.contains("Reply from 203.0.113.10"), "{report}");
+}

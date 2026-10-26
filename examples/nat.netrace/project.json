@@ -1,0 +1,223 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 30,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "router",
+      "name": "R1",
+      "position": {
+        "x": 552.0,
+        "y": 192.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/0": {
+            "address": {
+              "address": "192.168.1.1",
+              "prefix_len": 24
+            },
+            "shutdown": false
+          },
+          "GigabitEthernet0/1": {
+            "address": {
+              "address": "203.0.113.1",
+              "prefix_len": 24
+            },
+            "shutdown": false
+          }
+        },
+        "routes": [
+          {
+            "network": "0.0.0.0",
+            "prefix_len": 0,
+            "target": {
+              "next_hop": "203.0.113.2"
+            },
+            "distance": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "kind": "router",
+      "name": "ISP",
+      "position": {
+        "x": 816.0,
+        "y": 192.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet0/1": {
+            "address": {
+              "address": "203.0.113.2",
+              "prefix_len": 24
+            },
+            "shutdown": false
+          },
+          "GigabitEthernet0/0": {
+            "address": {
+              "address": "198.51.100.1",
+              "prefix_len": 24
+            },
+            "shutdown": false
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "kind": "l2_switch",
+      "name": "SW1",
+      "position": {
+        "x": 552.0,
+        "y": 336.0
+      }
+    },
+    {
+      "id": 4,
+      "kind": "pc",
+      "name": "PC1",
+      "position": {
+        "x": 408.0,
+        "y": 480.0
+      },
+      "ip": {
+        "address": "192.168.1.10",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 5,
+      "kind": "pc",
+      "name": "PC2",
+      "position": {
+        "x": 552.0,
+        "y": 480.0
+      },
+      "ip": {
+        "address": "192.168.1.11",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 6,
+      "kind": "server",
+      "name": "SRV1",
+      "position": {
+        "x": 696.0,
+        "y": 480.0
+      },
+      "ip": {
+        "address": "192.168.1.20",
+        "prefix_len": 24,
+        "gateway": "192.168.1.1"
+      }
+    },
+    {
+      "id": 7,
+      "kind": "server",
+      "name": "WEB",
+      "position": {
+        "x": 816.0,
+        "y": 336.0
+      },
+      "ip": {
+        "address": "198.51.100.10",
+        "prefix_len": 24,
+        "gateway": "198.51.100.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 8,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 3,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 9,
+      "a": {
+        "device": 1,
+        "port": "GigabitEthernet0/1"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 10,
+      "a": {
+        "device": 2,
+        "port": "GigabitEthernet0/0"
+      },
+      "b": {
+        "device": 7,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 11,
+      "a": {
+        "device": 3,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 4,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 12,
+      "a": {
+        "device": 3,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 5,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 13,
+      "a": {
+        "device": 3,
+        "port": "FastEthernet0/3"
+      },
+      "b": {
+        "device": 6,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [
+    {
+      "id": 14,
+      "kind": "note",
+      "rect": {
+        "x": 24.0,
+        "y": 48.0,
+        "width": 336.0,
+        "height": 180.0
+      },
+      "text": "NAT lab. The ISP only knows 203.0.113.0/24, so the private 192.168.1.0/24 network can't get replies. 1) Ping WEB (198.51.100.10) from PC1 and read in the Events tab where it fails. 2) On R1 mark Gi0/0 ip nat inside and Gi0/1 ip nat outside, then share Gi0/1's address with PAT (access-list 1 + ip nat inside source list 1 interface g0/1 overload). Ping again from PC1 and PC2 and compare show ip nat translations. 3) Publish SRV1 as 203.0.113.10 with static NAT and ping it from WEB."
+    }
+  ]
+}

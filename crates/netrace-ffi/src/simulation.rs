@@ -73,6 +73,22 @@ pub struct TraceEventInfo {
     pub session: Option<u64>,
     /// The access list checked at this hop, with the deciding line.
     pub acl: Option<AclDecisionInfo>,
+    /// What NAT rewrote at this hop (or why it didn't).
+    pub nat: Option<NatDecisionInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NatDecisionInfo {
+    /// "inside-to-outside" or "outside-to-inside".
+    pub direction: String,
+    pub translated: bool,
+    pub before_src: String,
+    pub before_dst: String,
+    pub after_src: String,
+    pub after_dst: String,
+    pub rule: Option<String>,
+    pub created: bool,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -110,7 +126,7 @@ pub struct ServiceBadge {
     pub device_id: u64,
     /// Physical port (subinterfaces map to their port).
     pub port: Option<String>,
-    /// "acl-in", "acl-out", "relay" or "dhcp-server".
+    /// "acl-in", "acl-out", "relay", "dhcp-server", "nat-inside" or "nat-outside".
     pub kind: String,
     pub label: String,
 }
@@ -333,6 +349,21 @@ impl From<&engine::TraceEvent> for TraceEventInfo {
                     .collect(),
                 matched: a.matched,
                 permitted: a.permitted,
+            }),
+            nat: e.nat.as_ref().map(|n| NatDecisionInfo {
+                direction: match n.direction {
+                    engine::NatDirection::InsideToOutside => "inside-to-outside",
+                    engine::NatDirection::OutsideToInside => "outside-to-inside",
+                }
+                .into(),
+                translated: n.translated,
+                before_src: n.before_src.clone(),
+                before_dst: n.before_dst.clone(),
+                after_src: n.after_src.clone(),
+                after_dst: n.after_dst.clone(),
+                rule: n.rule.clone(),
+                created: n.created,
+                note: n.note.clone(),
             }),
         }
     }
@@ -664,6 +695,14 @@ impl Simulation {
                             label: format!("ACL {acl} {direction} on {name}"),
                         });
                     }
+                }
+                if let Some(side) = iface.nat {
+                    badges.push(ServiceBadge {
+                        device_id: d.id.0,
+                        port: Some(port.clone()),
+                        kind: format!("nat-{}", side.ios()),
+                        label: format!("NAT {} on {name}", side.ios()),
+                    });
                 }
                 if !iface.helper_addresses.is_empty() {
                     let helpers: Vec<String> = iface

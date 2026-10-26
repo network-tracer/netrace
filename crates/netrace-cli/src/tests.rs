@@ -890,3 +890,86 @@ fn access_lists_from_the_cli() {
     );
     assert!(acls.contains("Extended IP access list WEB\n    10 permit udp any any eq bootps\n    15 deny icmp any any"), "{acls}");
 }
+
+#[test]
+fn nat_from_the_cli() {
+    let (p, r1, pc1) = lab();
+    let mut c = Console::new(p, r1);
+    c.lines(&[
+        "en",
+        "conf t",
+        "int g0/0",
+        "ip address 192.168.1.1 255.255.255.0",
+        "ip nat inside",
+        "no shut",
+        "int g0/1",
+        "ip address 192.168.2.1 255.255.255.0",
+        "ip nat outside",
+        "no shut",
+        "exit",
+        "access-list 1 permit 192.168.1.0 0.0.0.255",
+        "ip nat inside source list 1 interface g0/1 overload",
+        "ip nat inside source static 192.168.1.50 192.168.2.50",
+    ]);
+    assert_eq!(
+        c.run("ip nat pool BAD 10.0.0.9 10.0.0.1 netmask 255.255.255.0"),
+        "%End address less than start address in pool BAD\n"
+    );
+    c.run("ip nat pool PUB 192.168.2.100 192.168.2.110 prefix-length 24");
+    c.run("ip nat inside source list 2 pool PUB");
+    assert_eq!(
+        c.run("no ip nat pool PUB"),
+        "%Pool PUB in use, cannot destroy\n"
+    );
+    c.run("end");
+    let run = c.run("show run");
+    for line in [
+        " ip address 192.168.1.1 255.255.255.0\n ip nat inside",
+        " ip nat outside",
+        "ip nat pool PUB 192.168.2.100 192.168.2.110 netmask 255.255.255.0",
+        "ip nat inside source list 1 interface GigabitEthernet0/1 overload",
+        "ip nat inside source static 192.168.1.50 192.168.2.50",
+        "ip nat inside source list 2 pool PUB",
+    ] {
+        assert!(run.contains(line), "{line:?} missing from\n{run}");
+    }
+
+    c.network = Network::new(c.project.clone());
+    c.network
+        .ping(pc1, "192.168.2.10".parse().unwrap(), 2, SimTime::ZERO)
+        .unwrap();
+    let table = c.run("show ip nat translations");
+    assert!(
+        table.starts_with("Pro  Inside global         Inside local"),
+        "{table}"
+    );
+    assert!(
+        table.contains("---  192.168.2.50          192.168.1.50          ---"),
+        "{table}"
+    );
+    let flow = table
+        .lines()
+        .find(|l| l.starts_with("icmp"))
+        .unwrap_or_else(|| panic!("{table}"));
+    assert!(
+        flow.contains("192.168.2.1:") && flow.contains("192.168.1.10:"),
+        "{flow}"
+    );
+    let stats = c.run("show ip nat statistics");
+    assert!(
+        stats.contains("Total active translations: 2 (1 static, 1 dynamic; 1 extended)"),
+        "{stats}"
+    );
+    assert!(
+        stats.contains("Outside interfaces:\n  GigabitEthernet0/1"),
+        "{stats}"
+    );
+    assert!(
+        stats.contains("[Id: 1] access-list 1 interface GigabitEthernet0/1 overload refcount 1"),
+        "{stats}"
+    );
+    assert!(
+        stats.contains("total addresses 11, allocated 0 (0%)"),
+        "{stats}"
+    );
+}
