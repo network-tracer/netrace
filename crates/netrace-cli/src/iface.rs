@@ -18,7 +18,7 @@ pub(crate) fn types_for(kind: DeviceKind) -> Vec<(&'static str, &'static str)> {
     let mut types: Vec<(&str, &str)> = Vec::new();
     for (_, full) in TYPES {
         let present = ports.iter().any(|p| p.starts_with(full))
-            || (full == "Loopback" && matches!(kind, DeviceKind::Router | DeviceKind::L3Switch))
+            || (full == "Loopback" && (kind.is_router() || kind == DeviceKind::L3Switch))
             || (full == "Vlan" && kind.is_switch());
         if present {
             let help = match full {

@@ -230,6 +230,11 @@ final class WorkspaceModel: ObservableObject {
 
     var showsVlans: Bool { showsInspector && rightPane == .vlans }
 
+    /// The intro tour: the step showing, if it's running.
+    @Published var tourStep: Int?
+    /// Bumped by Help → Take the Tour (the window opens the tour network).
+    @Published var tourRequests = 0
+
     /// The bundled-lab browser sheet.
     @Published var showsLabBrowser = false
 
@@ -297,7 +302,7 @@ final class WorkspaceModel: ObservableObject {
     }
     @Published var pendingConnection: PendingConnection?
 
-    // Preview state for features that arrive in later milestones.
+    /// Each device's power state, mirrored from the document.
     @Published var power: [UInt64: PowerState] = [:]
     @Published var consoleSessions: [UInt64] = []
     @Published var activeConsole: UInt64?
@@ -396,8 +401,17 @@ final class WorkspaceModel: ObservableObject {
 
     func powerState(_ id: UInt64) -> PowerState { power[id] ?? .running }
 
+    /// Applied by the window to the document (saved, undoable, and seen by
+    /// the simulation); `power` mirrors the document for drawing.
+    var applyPower: ((PowerState, [UInt64]) -> Void)?
+    var applyReload: (([UInt64]) -> Void)?
+
     func setPower(_ state: PowerState, for ids: [UInt64]) {
-        for id in ids { power[id] = state }
+        applyPower?(state, ids)
+    }
+
+    func reload(_ ids: [UInt64]) {
+        applyReload?(ids)
     }
 
     func openConsole(for id: UInt64) {
@@ -444,5 +458,23 @@ final class WorkspaceModel: ObservableObject {
         if let active = activeConsole, !devices.contains(active) { activeConsole = consoleSessions.first }
         if let link = captureLink, !links.contains(link) { captureLink = nil }
         power = power.filter { devices.contains($0.key) }
+    }
+}
+
+extension WorkspaceModel.PowerState {
+    init(_ power: DevicePower) {
+        self = switch power {
+        case .on: .running
+        case .suspended: .suspended
+        case .off: .stopped
+        }
+    }
+
+    var devicePower: DevicePower {
+        switch self {
+        case .running: .on
+        case .suspended: .suspended
+        case .stopped: .off
+        }
     }
 }

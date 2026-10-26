@@ -7,7 +7,7 @@ enum DeviceCategory: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
-    var kinds: [DeviceKind] { DeviceKind.allCases.filter { $0.category == self } }
+    var kinds: [DeviceKind] { DeviceKind.allCases.filter { $0.category == self && $0.inLibrary } }
 }
 
 extension DeviceKind {
@@ -23,10 +23,13 @@ extension DeviceKind {
     /// Routers and switches: an IOS command line and a configuration.
     var hasCli: Bool {
         switch self {
-        case .router, .l2Switch, .l3Switch: true
+        case .router, .firewall, .cloud, .l2Switch, .l3Switch: true
         default: false
         }
     }
+
+    /// Devices that run as IOS routers (the firewall and the internet cloud too).
+    var isRouter: Bool { self == .router || self == .firewall || self == .cloud }
 
     /// End devices with a wired NIC: they take an IP configuration and can ping.
     var isHost: Bool {
@@ -62,7 +65,7 @@ extension DeviceKind {
         case .hub: "8 ports, one collision domain"
         case .firewall: "8 × Gigabit, ACLs and NAT"
         case .accessPoint: "Wireless LAN, Gigabit uplink"
-        case .cloud: "ISP / internet attachment"
+        case .cloud: "ISP router, 4 × Ethernet"
         case .pc: "Desktop, 1 × Fast Ethernet"
         case .laptop: "Portable, Ethernet + Wi-Fi"
         case .server: "DHCP, DNS and web services"
@@ -96,4 +99,10 @@ extension DeviceKind {
         guard !q.isEmpty else { return true }
         return displayName.lowercased().contains(q) || keywords.contains { $0.contains(q) }
     }
+}
+
+extension DeviceKind {
+    /// Wireless isn't simulated in v1, so the access point and smartphone stay
+    /// out of the library (projects that have them still open).
+    var inLibrary: Bool { self != .accessPoint && self != .smartphone }
 }

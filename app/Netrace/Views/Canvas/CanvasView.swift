@@ -153,7 +153,7 @@ struct CanvasView: View {
     private var routeHover: LinksLayer.RouteHover? {
         guard workspace.showsLayer2, !workspace.showsSpanningTree, !workspace.showsOspf, !workspace.showsVlans,
               let id = workspace.hoveredDevice, let device = document.device(id),
-              device.kind == .router || device.kind == .l3Switch else { return nil }
+              device.kind.isRouter || device.kind == .l3Switch else { return nil }
         let paths = simulation.routePaths(of: id)
         return paths.isEmpty ? nil : LinksLayer.RouteHover(device: id, paths: paths)
     }

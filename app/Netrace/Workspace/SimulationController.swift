@@ -247,6 +247,11 @@ final class SimulationController: ObservableObject {
         simulation?.macAddress(device: device, port: port)
     }
 
+    /// The frames that crossed a cable, as a libpcap file.
+    func pcap(link: UInt64) -> Data? {
+        simulation.map { Data($0.pcap(linkId: link)) }
+    }
+
     func event(_ id: UInt64) -> TraceEventInfo? {
         trace.first { $0.id == id }
     }

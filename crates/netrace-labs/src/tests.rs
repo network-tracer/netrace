@@ -175,3 +175,92 @@ fn locked_devices_can_be_looked_at_but_not_changed() {
         }
     }
 }
+
+#[test]
+fn the_tour_network_shows_every_feature_working() {
+    use netrace_engine::{NeighborState, Outcome, RouteSource, TcpApp};
+    let project = Project::from_json(crate::tour_json()).expect("tour loads");
+    let id = |name: &str| device_id(&project, name).unwrap();
+    let ip = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+    let mut net = Network::new(project.clone());
+    assert!(net.warnings().is_empty(), "{:?}", net.warnings());
+
+    // DHCP: workstations in every agency get leases from the core.
+    for (host, net_) in [
+        ("SOC-1", 10),
+        ("SECURE-LINK", 20),
+        ("AUDITOR", 30),
+        ("GPS-TRACK", 40),
+    ] {
+        let (a, ..) = net.current_address(id(host)).unwrap();
+        assert_eq!(a.octets()[..3], [10, net_, net_], "{host}: {a}");
+    }
+    // Spanning tree: the core is root, and the SW-IA–SW-FIELD link closes
+    // a loop, so one port blocks.
+    let tree = &net.layer2().trees[&30];
+    let blocked = tree.ports.values().filter(|p| !p.role.forwards()).count();
+    assert_eq!(blocked, 1);
+    // OSPF: the core and the firewall are adjacent, and the firewall's
+    // default route reaches the core.
+    for r in ["CORE", "FW"] {
+        let full = net
+            .ospf()
+            .router(id(r))
+            .unwrap()
+            .neighbors
+            .iter()
+            .filter(|n| n.state == NeighborState::Full)
+            .count();
+        assert_eq!(full, 1, "{r}");
+    }
+    assert!(
+        netrace_engine::routing_table(&project, id("CORE"))
+            .iter()
+            .any(|r| r.is_default() && r.source == RouteSource::OspfExternal2)
+    );
+
+    let mut t = net.end_time() + std::time::Duration::from_secs(1);
+    let step = std::time::Duration::from_secs(30);
+    let replies = |net: &mut Network, from: &str, to: &str, t| {
+        let s = net.ping(id(from), ip(to), 6, t).unwrap();
+        net.session_report(s)
+            .unwrap()
+            .contains(&format!("Reply from {to}"))
+    };
+    // PAT through the firewall: a ping and a web request to the internet.
+    assert!(replies(&mut net, "GPS-TRACK", "198.51.100.10", t));
+    t = t + step;
+    let web = net
+        .connect(id("SOC-1"), ip("198.51.100.10"), 80, TcpApp::Http, t)
+        .unwrap();
+    let report = net.connection_report(web).unwrap();
+    assert!(report.contains("netrace web server"), "{report}");
+    assert!(
+        net.nat_translations(id("FW"))
+            .iter()
+            .any(|e| e.proto == Some(netrace_engine::NatProto::Tcp))
+    );
+    t = t + step;
+    // Inter-VLAN routing on the core, and its access list: Field Ops can't
+    // reach the personnel server; Counterterrorism can.
+    assert!(replies(&mut net, "THREAT-MON", "10.30.30.20", t));
+    t = t + step;
+    assert!(!replies(&mut net, "GPS-TRACK", "10.30.30.20", t));
+    t = t + step;
+    // SPAN: the Watchers capture Internal Affairs' traffic to the vault.
+    let before = net.trace().len();
+    assert!(replies(&mut net, "AUDITOR", "10.50.50.10", t));
+    let watcher = id("WATCHER");
+    let captured = net.trace()[before..]
+        .iter()
+        .filter(|e| e.device == watcher && e.outcome == Outcome::Accepted)
+        .count();
+    assert!(captured >= 4, "{captured}");
+    // Every kind of frame here (tagged, DHCP, OSPF, BPDUs, TCP) encodes
+    // for pcap export to exactly its stated length.
+    for e in net.trace() {
+        if let Some(frame) = &e.frame {
+            assert_eq!(frame.to_bytes().len(), frame.len(), "{}", frame.info());
+        }
+    }
+}

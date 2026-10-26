@@ -19,7 +19,9 @@ make test    # Rust tests
 make lint    # rustfmt + clippy
 ```
 
-Choose **File → New from Lab…** (⌥⌘N) for 20 guided CCNA labs that check
+New here? **Help → Take the Tour** walks through the app on the Shadow
+Network, a multi-agency VLAN operation with every feature set up
+(`examples/tour.netrace`). Choose **File → New from Lab…** (⌥⌘N) for 20 guided CCNA labs that check
 your work as you go (see [LABS.md](LABS.md)). Or open `examples/services.netrace` for a DHCP and access list lab,
 `examples/nat.netrace` for NAT and PAT, `examples/ospf.netrace` for OSPF,
 `examples/vlans.netrace` for a VLAN, trunk and router-on-a-stick lab

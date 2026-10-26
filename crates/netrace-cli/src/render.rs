@@ -90,7 +90,7 @@ fn interface_names(device: &Device) -> Vec<String> {
 pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig) -> String {
     let kind = device.kind;
     let mut out = String::new();
-    let router = kind == DeviceKind::Router;
+    let router = kind.is_router();
     out += "!\n";
     out += if router {
         "version 15.4\n"
@@ -173,6 +173,26 @@ pub(crate) fn config_text(device: &Device, hostname: &str, config: &DeviceConfig
     }
     if config.lldp_run {
         out += "lldp run\n";
+    }
+    for (n, session) in &config.monitor_sessions {
+        for (port, direction) in &session.sources {
+            let suffix = match direction {
+                netrace_doc::SpanDirection::Both => String::new(),
+                d => format!(" {}", d.ios()),
+            };
+            let _ = writeln!(
+                out,
+                "monitor session {n} source interface {}{suffix}",
+                abbreviate_port(port)
+            );
+        }
+        if let Some(port) = &session.destination {
+            let _ = writeln!(
+                out,
+                "monitor session {n} destination interface {}",
+                abbreviate_port(port)
+            );
+        }
     }
     out += "!\n";
     // The VLAN database, as a switch in VTP transparent mode keeps it in its configuration.
@@ -713,6 +733,8 @@ pub(crate) fn mac_table(network: &Network, device: netrace_doc::DeviceId) -> Str
 pub(crate) fn version(device: &Device) -> String {
     let (platform, ports) = match device.kind {
         DeviceKind::Router => ("ISR-style router", "4 Gigabit Ethernet interfaces"),
+        DeviceKind::Firewall => ("security router", "8 Gigabit Ethernet interfaces"),
+        DeviceKind::Cloud => ("service-provider router", "4 Ethernet interfaces"),
         DeviceKind::L3Switch => ("multilayer switch", "24 Gigabit Ethernet interfaces"),
         _ => (
             "access switch",

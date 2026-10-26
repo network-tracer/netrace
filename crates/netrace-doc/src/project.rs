@@ -72,6 +72,26 @@ pub struct Device {
     /// Saved by `copy running-config startup-config`; `reload` restores it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup: Option<StartupConfig>,
+    #[serde(default, skip_serializing_if = "Power::is_on")]
+    pub power: Power,
+}
+
+/// Whether a device is running, as in GNS3's Start / Suspend / Stop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Power {
+    #[default]
+    On,
+    /// Keeps its links up but handles nothing.
+    Suspended,
+    /// Switched off: its links go down.
+    Off,
+}
+
+impl Power {
+    pub fn is_on(&self) -> bool {
+        *self == Power::On
+    }
 }
 
 /// A device's name and settings, without its place on the canvas. What a
@@ -107,6 +127,29 @@ pub struct Link {
     /// `None` uses the medium's own look (copper solid, fibre double line).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<LinePattern>,
+    /// Delay, jitter, loss and bandwidth the simulation applies to it.
+    #[serde(default, skip_serializing_if = "Conditioning::is_default")]
+    pub conditioning: Conditioning,
+}
+
+/// How a cable behaves beyond a perfect wire: added delay, random jitter,
+/// a share of frames lost, and a bandwidth limit (serialisation delay).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Conditioning {
+    pub latency_ms: u32,
+    pub jitter_ms: u32,
+    /// 0 to 100.
+    pub loss_percent: u8,
+    /// `None` is unlimited.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bandwidth_kbps: Option<u32>,
+}
+
+impl Conditioning {
+    pub fn is_default(&self) -> bool {
+        *self == Conditioning::default()
+    }
 }
 
 /// A device or annotation, for operations that apply to both (grouping).
@@ -143,6 +186,32 @@ pub struct Project {
     /// Instructions and checks, when the project is a lab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lab: Option<crate::Lab>,
+    /// Saved states of the topology to go back to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    snapshots: Vec<Snapshot>,
+}
+
+/// A saved state of the topology: devices with their configuration, cables
+/// and annotations, as they were when it was taken.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub name: String,
+    /// When it was taken, in seconds since 1970.
+    pub taken: u64,
+    devices: Vec<Device>,
+    links: Vec<Link>,
+    #[serde(default)]
+    annotations: Vec<Annotation>,
+}
+
+impl Snapshot {
+    pub fn device_count(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.links.len()
+    }
 }
 
 #[derive(Deserialize)]
@@ -157,6 +226,12 @@ impl Default for Project {
     }
 }
 
+/// A server's DHCP service: its pool and the excluded address ranges.
+pub type ServerDhcp = (
+    crate::DhcpPool,
+    Vec<(std::net::Ipv4Addr, std::net::Ipv4Addr)>,
+);
+
 impl Project {
     pub fn new() -> Self {
         Project {
@@ -167,7 +242,134 @@ impl Project {
             links: Vec::new(),
             annotations: Vec::new(),
             lab: None,
+            snapshots: Vec::new(),
         }
+    }
+
+    /// A server's DHCP service: one pool, and the address ranges kept out of it.
+    /// `None` turns the service off. Returns the previous setting.
+    pub fn set_server_dhcp(
+        &mut self,
+        id: DeviceId,
+        service: Option<ServerDhcp>,
+    ) -> Result<Option<ServerDhcp>, DocError> {
+        self.check_unlocked(id)?;
+        let device = self.device_mut(id)?;
+        if device.kind != DeviceKind::Server {
+            return Err(DocError::NotAHost(device.name.clone()));
+        }
+        let previous = device
+            .config
+            .dhcp_pools
+            .first()
+            .cloned()
+            .map(|p| (p, device.config.dhcp_excluded.clone()));
+        match service {
+            Some((pool, excluded)) => {
+                device.config.dhcp_pools = vec![pool];
+                device.config.dhcp_excluded = excluded;
+            }
+            None => {
+                device.config.dhcp_pools.clear();
+                device.config.dhcp_excluded.clear();
+            }
+        }
+        Ok(previous)
+    }
+
+    /// Starts, suspends or stops a device; returns its previous state.
+    pub fn set_power(&mut self, id: DeviceId, power: Power) -> Result<Power, DocError> {
+        let device = self.device_mut(id)?;
+        Ok(std::mem::replace(&mut device.power, power))
+    }
+
+    pub fn snapshots(&self) -> &[Snapshot] {
+        &self.snapshots
+    }
+
+    /// Saves the topology as it is now; returns the new snapshot's index.
+    pub fn take_snapshot(&mut self, name: &str, taken: u64) -> usize {
+        let name = match name.trim() {
+            "" => format!("Snapshot {}", self.snapshots.len() + 1),
+            n => n.chars().take(80).collect(),
+        };
+        self.snapshots.push(Snapshot {
+            name,
+            taken,
+            devices: self.devices.clone(),
+            links: self.links.clone(),
+            annotations: self.annotations.clone(),
+        });
+        self.snapshots.len() - 1
+    }
+
+    /// Puts the topology back as a snapshot saved it (the snapshots, the
+    /// lab and the id counter stay). Returns the state it replaced, for undo.
+    pub fn restore_snapshot(&mut self, index: usize) -> Result<Snapshot, DocError> {
+        let snapshot = self
+            .snapshots
+            .get(index)
+            .cloned()
+            .ok_or(DocError::UnknownSnapshot(index))?;
+        let previous = self.current_state();
+        self.set_state(snapshot)?;
+        Ok(previous)
+    }
+
+    /// The topology as it is now, in snapshot form (not stored).
+    pub fn current_state(&self) -> Snapshot {
+        Snapshot {
+            name: String::new(),
+            taken: 0,
+            devices: self.devices.clone(),
+            links: self.links.clone(),
+            annotations: self.annotations.clone(),
+        }
+    }
+
+    /// Replaces the topology with a saved state (undo of a restore).
+    pub fn set_state(&mut self, state: Snapshot) -> Result<(), DocError> {
+        let mut candidate = self.clone();
+        candidate.devices = state.devices;
+        candidate.links = state.links;
+        candidate.annotations = state.annotations;
+        // Ids handed out since the snapshot must never be reused.
+        let highest = candidate
+            .devices
+            .iter()
+            .map(|d| d.id.0)
+            .chain(candidate.links.iter().map(|l| l.id.0))
+            .chain(candidate.annotations.iter().map(|a| a.id.0))
+            .max()
+            .unwrap_or(0);
+        candidate.next_id = candidate.next_id.max(highest + 1);
+        candidate.validate()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    pub fn delete_snapshot(&mut self, index: usize) -> Result<Snapshot, DocError> {
+        if index >= self.snapshots.len() {
+            return Err(DocError::UnknownSnapshot(index));
+        }
+        Ok(self.snapshots.remove(index))
+    }
+
+    /// Reverses [`Project::delete_snapshot`].
+    pub fn insert_snapshot(&mut self, index: usize, snapshot: Snapshot) {
+        let index = index.min(self.snapshots.len());
+        self.snapshots.insert(index, snapshot);
+    }
+
+    pub fn rename_snapshot(&mut self, index: usize, name: &str) -> Result<String, DocError> {
+        let snapshot = self
+            .snapshots
+            .get_mut(index)
+            .ok_or(DocError::UnknownSnapshot(index))?;
+        Ok(std::mem::replace(
+            &mut snapshot.name,
+            name.trim().chars().take(80).collect(),
+        ))
     }
 
     pub fn lab(&self) -> Option<&crate::Lab> {
@@ -347,6 +549,7 @@ impl Project {
             group: None,
             config: DeviceConfig::default(),
             startup: None,
+            power: Power::On,
         };
         self.devices.push(device);
         self.devices.last().expect("just pushed")
@@ -447,12 +650,13 @@ impl Project {
             d.name.hash(&mut hasher);
             d.ip.hash(&mut hasher);
             d.dhcp.hash(&mut hasher);
+            d.power.hash(&mut hasher);
             serde_json::to_string(&d.config)
                 .unwrap_or_default()
                 .hash(&mut hasher);
         }
         for l in &self.links {
-            (l.id, &l.a, &l.b, l.medium).hash(&mut hasher);
+            (l.id, &l.a, &l.b, l.medium, l.conditioning).hash(&mut hasher);
         }
         hasher.finish()
     }
@@ -506,6 +710,24 @@ impl Project {
     }
 
     /// Sets a cable's colour and line pattern; returns the previous ones.
+    /// Sets a cable's conditioning; returns the previous one.
+    pub fn set_link_conditioning(
+        &mut self,
+        id: LinkId,
+        conditioning: Conditioning,
+    ) -> Result<Conditioning, DocError> {
+        let link = self
+            .links
+            .iter_mut()
+            .find(|l| l.id == id)
+            .ok_or(DocError::UnknownLink(id))?;
+        let conditioning = Conditioning {
+            loss_percent: conditioning.loss_percent.min(100),
+            ..conditioning
+        };
+        Ok(std::mem::replace(&mut link.conditioning, conditioning))
+    }
+
     pub fn set_link_style(
         &mut self,
         id: LinkId,
@@ -614,6 +836,7 @@ impl Project {
             medium,
             color: None,
             line: None,
+            conditioning: Conditioning::default(),
         };
         self.check_link(&link, &self.port_usage())?;
         self.allocate_id();
@@ -1301,5 +1524,35 @@ mod tests {
             Project::from_json(stale_counter),
             Err(DocError::StaleIdCounter { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn snapshots_restore_and_undo() {
+        let mut p = Project::new();
+        let r = p.add_device(DeviceKind::Router, Point::default()).id;
+        assert_eq!(p.take_snapshot("", 100), 0);
+        assert_eq!(p.snapshots()[0].name, "Snapshot 1");
+        let pc = p.add_device(DeviceKind::Pc, Point::default()).id;
+        p.rename_device(r, "Edge").unwrap();
+        let replaced = p.restore_snapshot(0).unwrap();
+        assert!(p.device(pc).is_none());
+        assert_ne!(p.device(r).unwrap().name, "Edge");
+        // A new device after restoring never reuses the PC's id.
+        let next = p.add_device(DeviceKind::Pc, Point::default()).id;
+        assert!(next.0 > pc.0);
+        p.set_state(replaced).unwrap();
+        assert_eq!(p.device(r).unwrap().name, "Edge");
+        let removed = p.delete_snapshot(0).unwrap();
+        assert!(p.snapshots().is_empty());
+        p.insert_snapshot(0, removed);
+        assert_eq!(p.snapshots().len(), 1);
+        // Snapshots are saved with the project.
+        let back = Project::from_json(&p.to_json()).unwrap();
+        assert_eq!(back.snapshots().len(), 1);
     }
 }

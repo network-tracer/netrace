@@ -1117,3 +1117,41 @@ fn ospf_from_the_cli() {
     let report = c.network.session_report(s).unwrap();
     assert!(report.contains("Reply from 192.168.2.10"), "{report}");
 }
+
+#[test]
+fn span_sessions_are_configured_and_shown() {
+    let mut p = Project::new();
+    let sw = p.add_device(DeviceKind::L2Switch, Point::default()).id;
+    let mut c = Console::new(p, sw);
+    c.lines(&[
+        "enable",
+        "configure terminal",
+        "monitor session 1 source interface g0/1",
+        "monitor session 1 source interface f0/2 rx",
+        "monitor session 1 destination interface f0/24",
+    ]);
+    assert!(
+        c.run("monitor session 1 source interface f0/24")
+            .contains("already the destination")
+    );
+    c.run("end");
+    let config = c.run("show running-config");
+    assert!(
+        config.contains("monitor session 1 source interface Gi0/1\n"),
+        "{config}"
+    );
+    assert!(
+        config.contains("monitor session 1 source interface Fa0/2 rx"),
+        "{config}"
+    );
+    assert!(
+        config.contains("monitor session 1 destination interface Fa0/24"),
+        "{config}"
+    );
+    let show = c.run("show monitor");
+    assert!(show.contains("Both               : Gi0/1"), "{show}");
+    assert!(show.contains("RX Only            : Fa0/2"), "{show}");
+    assert!(show.contains("Destination Ports      : Fa0/24"), "{show}");
+    c.lines(&["configure terminal", "no monitor session 1", "end"]);
+    assert!(!c.run("show running-config").contains("monitor session"));
+}

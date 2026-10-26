@@ -312,7 +312,6 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | DNS / HTTP server, NTP, Syslog, SNMP | Windows / Linux builds |
 | Telnet / SSH between simulated devices | Real-time multi-user collaboration |
 | Wireless (WLC / APs) | AI tutor |
-| `.pcap` export for Wireshark | |
 | In-app lab authoring, iPad app | |
 
 ## Milestones
@@ -328,7 +327,7 @@ fibre. Link lights show green / amber (STP blocking) / red (down).
 | M5 ✅ | Services | Minimal TCP ✅ (handshake, one request and response, close; PC `curl` and `telnet`; extended ACL ports and PAT act on it), DHCP ✅ (server, relay, APIPA, DORA in the trace) and ACLs ✅ (standard / extended, numbered / named, deciding line in the inspector, shield badges), NAT/PAT ✅ (static, pool, overload; before / after addresses and the rule in the inspector, inside / outside badges), OSPF ✅ (neighbours with mismatch reasons, DR / BDR election, LSDB, SPF with equal-cost paths, inter-area and default routes) |
 | M5.5 ✅ | Protocol views | STP view (roles, reasons, blocked ports, reconvergence when a link fails), OSPF view (router IDs, neighbours, elections, routes and why, LSDB, cost and DR / BDR labels, adjacency lines labelled with their area, link-failure replay), VLAN view (members, hosts, trunks, gateways; the chosen VLAN lit on the canvas), ACL / NAT / DHCP / TCP in the packet inspector, BPDUs and OSPF hellos / LS Updates traced as packets when the simulation starts (no periodic repeats), NAT router badge, a router's routes shown along its cables on hover |
 | M6 ✅ | Labs + polish | Lab engine ✅ (checks on simulated state, live progress, per-check feedback, hints), 20 labs ✅ (each proven by a scripted solution, see LABS.md), locked items ✅ (lab scenery you can look at but not change), performance pass ✅ (102-device campus rebuilds in about 4 ms; spanning tree now elects a root per switched island), beta build ✅ (`make beta`: tested, universal Release app zipped in dist/) |
-| M7 | Intro tutorial | A showcase project with every M1–M6 feature already configured (VLANs and trunks, spanning tree, routing and OSPF, DHCP, ACLs, NAT/PAT, TCP), and a guided tour over it that points at each part of the window and what it's for, written for people arriving from Packet Tracer or GNS3: where the device library, console, inspector, protocol views, simulation timeline and labs are, and how they map to what those tools call them |
+| M7 ✅ | Intro tutorial | The Shadow Network (examples/tour.netrace): four agency VLANs around a layer 3 core, a shared data centre, a firewall doing PAT to an ISP cloud, and a hidden VLAN 99 listening on a SPAN port, drawn as solid-colour polygon zones, with every M1–M6 feature proven working by a test. A 14-step tour over it in the style of a macOS popover (icon tile, page dots, arrow pointing at the part described, spring-animated spotlight) via Help → Take the Tour, the lab browser and a one-time offer on first launch; each step names the Packet Tracer / GNS3 equivalent and acts on the network. Checked step by step in the app. Alongside it, an audit replaced every placeholder: snapshots, device power (on / suspended / off), link conditioning (latency, jitter, loss, bandwidth), a server DHCP service, the firewall and internet cloud running as IOS routers, SPAN (`monitor session`), and `.pcap` export |
 
 ## Quality targets
 

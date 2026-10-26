@@ -253,21 +253,6 @@ struct StatusDot: View {
     }
 }
 
-/// Marks panels showing placeholder content until their milestone ships.
-struct PreviewBadge: View {
-    let milestone: String
-
-    var body: some View {
-        Text("Preview · \(milestone)")
-            .font(Theme.Font.captionMedium)
-            .foregroundStyle(Theme.Palette.textSecondary)
-            .padding(.horizontal, Theme.Spacing.s - 1)
-            .padding(.vertical, Theme.Spacing.xxs)
-            .background(Capsule().fill(Theme.Palette.hover))
-            .overlay(Capsule().strokeBorder(Theme.Palette.border))
-            .help("Placeholder content. This panel becomes live in milestone \(milestone).")
-    }
-}
 
 struct KeyValueRow: View {
     let label: String

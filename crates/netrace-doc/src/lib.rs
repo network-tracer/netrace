@@ -27,8 +27,8 @@ pub use ip::{HostIp, prefix_from_mask};
 pub use lab::{Lab, LabCheck, LabTask};
 pub use ospf::{OspfInterface, OspfNetwork, OspfProcess};
 pub use project::{
-    CanvasItem, Device, DeviceId, DeviceSettings, Endpoint, Link, LinkId, Point, Project,
-    RemovedDevice,
+    CanvasItem, Conditioning, Device, DeviceId, DeviceSettings, Endpoint, Link, LinkId, Point,
+    Power, Project, RemovedDevice, Snapshot,
 };
 pub use services::{
     AccessList, AclAction, AclAddress, AclEntry, AclKind, AclProtocol, DhcpPool, IcmpMatch,
@@ -36,7 +36,8 @@ pub use services::{
 };
 pub use style::{GroupId, LinePattern, ShapeKind, ShapeStyle, Swatch};
 pub use switching::{
-    PortMode, PortSecurity, StpConfig, StpMode, SwitchportConfig, Violation, VlanConfig, VlanSet,
+    MonitorSession, PortMode, PortSecurity, SpanDirection, StpConfig, StpMode, SwitchportConfig,
+    Violation, VlanConfig, VlanSet,
 };
 
 /// File inside the `.netrace` package that holds the project JSON.

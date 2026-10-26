@@ -118,3 +118,9 @@ impl Simulation {
             .collect()
     }
 }
+
+/// The showcase network the intro tour walks through, as file contents.
+#[uniffi::export]
+pub fn tour_project_json() -> Vec<u8> {
+    labs::tour_json().to_vec()
+}

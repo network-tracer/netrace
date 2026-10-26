@@ -160,6 +160,9 @@ private struct DeviceInspector: View {
         }
         if device.kind.isHost {
             HostIPEditor(device: device, document: document, workspace: workspace)
+            if device.kind == .server {
+                ServerDHCPEditor(device: device, document: document, workspace: workspace)
+            }
         }
         InspectorSection("Status") {
             KeyValueRow("Power", power.title)
@@ -647,10 +650,14 @@ private struct LinkInspector: View {
     @ObservedObject var workspace: WorkspaceModel
     @Environment(\.undoManager) private var undoManager
 
+    // Drafts while a slider moves; committed to the cable when it's let go.
     @State private var latency = 0.0
     @State private var jitter = 0.0
     @State private var loss = 0.0
-    @State private var bandwidth = "Unlimited"
+
+    private static let bandwidths: [(String, UInt32?)] = [
+        ("Unlimited", nil), ("1 Gbit/s", 1_000_000), ("100 Mbit/s", 100_000), ("10 Mbit/s", 10_000), ("1.5 Mbit/s", 1_544),
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -698,21 +705,35 @@ private struct LinkInspector: View {
                     }
                     .controlSize(.small)
 
-                    InspectorSection("Conditioning", trailing: { PreviewBadge(milestone: "M5") }) {
+                    InspectorSection("Conditioning") {
                         slider("Latency", value: $latency, range: 0...500, unit: "ms")
                         slider("Jitter", value: $jitter, range: 0...100, unit: "ms")
                         slider("Packet loss", value: $loss, range: 0...100, unit: "%")
                         HStack {
                             Text("Bandwidth").font(Theme.Font.body).foregroundStyle(Theme.Palette.textSecondary)
                             Spacer()
-                            Picker("Bandwidth", selection: $bandwidth) {
-                                ForEach(["Unlimited", "1 Gbit/s", "100 Mbit/s", "10 Mbit/s", "1.5 Mbit/s"], id: \.self) { Text($0) }
+                            Picker("Bandwidth", selection: Binding(
+                                get: { link.conditioning.bandwidthKbps },
+                                set: { kbps in
+                                    var c = link.conditioning
+                                    c.bandwidthKbps = kbps
+                                    document.setLinkConditioning(link.id, c, undoManager: undoManager)
+                                }
+                            )) {
+                                ForEach(Self.bandwidths, id: \.0) { Text($0.0).tag($0.1) }
                             }
                             .labelsHidden()
                             .fixedSize()
                             .controlSize(.small)
                         }
+                        Text("Applied to every frame on this cable in the simulation: ping times grow, lost frames show in Events.")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .onAppear(perform: loadConditioning)
+                    .onChange(of: link.id) { _, _ in loadConditioning() }
+                    .onChange(of: link.conditioning) { _, _ in loadConditioning() }
 
                     Button("Delete Cable", systemImage: "trash", role: .destructive) {
                         document.disconnect(link.id, undoManager: undoManager)
@@ -759,9 +780,26 @@ private struct LinkInspector: View {
                     .font(Theme.Font.mono)
                     .foregroundStyle(Theme.Palette.textPrimary)
             }
-            Slider(value: value, in: range)
-                .controlSize(.small)
+            Slider(value: value, in: range, onEditingChanged: { editing in
+                if !editing { commitConditioning() }
+            })
+            .controlSize(.small)
         }
+    }
+
+    private func loadConditioning() {
+        latency = Double(link.conditioning.latencyMs)
+        jitter = Double(link.conditioning.jitterMs)
+        loss = Double(link.conditioning.lossPercent)
+    }
+
+    private func commitConditioning() {
+        var c = link.conditioning
+        c.latencyMs = UInt32(latency.rounded())
+        c.jitterMs = UInt32(jitter.rounded())
+        c.lossPercent = UInt8(loss.rounded())
+        guard c != link.conditioning else { return }
+        document.setLinkConditioning(link.id, c, undoManager: undoManager)
     }
 }
 
@@ -1069,7 +1107,6 @@ private struct SelectionInspector: View {
 private struct ProjectInspector: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var workspace: WorkspaceModel
-    @State private var acceleratesTimers = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1086,24 +1123,7 @@ private struct ProjectInspector: View {
                         }
                         KeyValueRow("Cables", "\(document.state.links.count)")
                     }
-                    InspectorSection("Simulation") {
-                        Toggle("Accelerate protocol timers", isOn: $acceleratesTimers)
-                            .font(Theme.Font.body)
-                            .toggleStyle(.switch)
-                            .controlSize(.mini)
-                        Text("Spanning tree and OSPF converge in seconds instead of 30–40 s.")
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Palette.textTertiary)
-                        KeyValueRow("Random seed", "0x2F6B", mono: true)
-                    }
-                    InspectorSection("Snapshots", trailing: { PreviewBadge(milestone: "M6") }) {
-                        snapshotRow("Before VLANs", "Today, 11:02")
-                        snapshotRow("Cabled", "Today, 10:47")
-                        Button("Take Snapshot", systemImage: "camera") {
-                            workspace.flash("Snapshots arrive in M6.")
-                        }
-                        .controlSize(.small)
-                    }
+                    SnapshotsSection(document: document, workspace: workspace)
                 }
                 .padding(Theme.Spacing.l)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1111,13 +1131,93 @@ private struct ProjectInspector: View {
         }
     }
 
-    private func snapshotRow(_ name: String, _ date: String) -> some View {
-        HStack {
-            Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.Palette.textTertiary)
-            Text(name).font(Theme.Font.body).foregroundStyle(Theme.Palette.textPrimary)
-            Spacer()
-            Text(date).font(Theme.Font.caption).foregroundStyle(Theme.Palette.textTertiary)
+}
+
+/// Saved states of the topology: take one before a risky change, restore
+/// it if the change goes wrong. Restoring can be undone.
+private struct SnapshotsSection: View {
+    @ObservedObject var document: ProjectDocument
+    @ObservedObject var workspace: WorkspaceModel
+    @Environment(\.undoManager) private var undoManager
+    @State private var naming = false
+    @State private var name = ""
+    @State private var confirming: Int?
+    @FocusState private var nameFocused: Bool
+
+    var body: some View {
+        InspectorSection("Snapshots") {
+            if document.snapshots.isEmpty && !naming {
+                Text("Save the topology as it is now, and come back to it after you try something.")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(document.snapshots.enumerated()).reversed(), id: \.offset) { index, snapshot in
+                row(snapshot, index: index)
+            }
+            if naming {
+                HStack(spacing: Theme.Spacing.s) {
+                    TextField("Snapshot name", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($nameFocused)
+                        .onSubmit(take)
+                        .onExitCommand { naming = false }
+                    Button("Save", action: take).controlSize(.small)
+                }
+            } else {
+                Button("Take Snapshot", systemImage: "camera") {
+                    name = "Snapshot \(document.snapshots.count + 1)"
+                    naming = true
+                    nameFocused = true
+                }
+                .controlSize(.small)
+            }
         }
+        .confirmationDialog("Restore this snapshot?", isPresented: Binding(
+            get: { confirming != nil }, set: { if !$0 { confirming = nil } }
+        )) {
+            Button("Restore") {
+                if let index = confirming,
+                   case .failure(let error) = document.restoreSnapshot(index, undoManager: undoManager) {
+                    workspace.flash(error.message)
+                } else {
+                    workspace.flash("Snapshot restored. Edit → Undo brings back what you had.")
+                }
+                confirming = nil
+            }
+        } message: {
+            Text("The topology goes back to how it was. You can undo this.")
+        }
+    }
+
+    private func row(_ snapshot: SnapshotInfo, index: Int) -> some View {
+        HStack(spacing: Theme.Spacing.s) {
+            Image(systemName: "clock.arrow.circlepath").foregroundStyle(Theme.Palette.textTertiary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(snapshot.name).font(Theme.Font.body).foregroundStyle(Theme.Palette.textPrimary)
+                Text("\(Self.relative(snapshot.taken)) · \(snapshot.devices) devices, \(snapshot.cables) cables")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.textTertiary)
+            }
+            Spacer(minLength: Theme.Spacing.s)
+            Button("Restore") { confirming = index }
+                .controlSize(.small)
+        }
+        .contextMenu {
+            Button("Restore…") { confirming = index }
+            Button("Delete", role: .destructive) { document.deleteSnapshot(index, undoManager: undoManager) }
+        }
+    }
+
+    private func take() {
+        document.takeSnapshot(named: name, undoManager: undoManager)
+        naming = false
+    }
+
+    static func relative(_ seconds: UInt64) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: Date(timeIntervalSince1970: TimeInterval(seconds)), relativeTo: Date())
     }
 }
 
@@ -1234,5 +1334,110 @@ private struct AclDecisionView: View {
         .padding(.vertical, 2)
         .padding(.horizontal, 4)
         .background(matched ? color.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+/// A server's DHCP service, as in Packet Tracer's Services tab: one pool
+/// with its gateway and DNS server, handing out addresses from a start one.
+private struct ServerDHCPEditor: View {
+    let device: DeviceInfo
+    @ObservedObject var document: ProjectDocument
+    @ObservedObject var workspace: WorkspaceModel
+    @Environment(\.undoManager) private var undoManager
+    @State private var network = ""
+    @State private var mask = "255.255.255.0"
+    @State private var gateway = ""
+    @State private var dns = ""
+    @State private var start = ""
+
+    var body: some View {
+        let service = document.serverDHCP(device.id)
+        InspectorSection("DHCP Service") {
+            Toggle("Hand out addresses", isOn: Binding(
+                get: { service != nil },
+                set: { on in on ? enable() : save(nil) }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .font(Theme.Font.body)
+            if service != nil {
+                field("Network", $network, "192.168.1.0")
+                field("Mask", $mask, "255.255.255.0")
+                field("Gateway", $gateway, "Optional")
+                field("DNS server", $dns, "Optional")
+                field("Start address", $start, "192.168.1.100")
+                HStack {
+                    Spacer()
+                    Button("Apply") { save(current()) }
+                        .controlSize(.small)
+                        .disabled(current() == service)
+                }
+                Text("PCs set to DHCP on this network get an address from \(start.isEmpty ? "the start address" : start) up.")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear(perform: load)
+        .onChange(of: device.id) { _, _ in load() }
+    }
+
+    private func field(_ label: String, _ text: Binding<String>, _ prompt: String) -> some View {
+        HStack {
+            Text(label).font(Theme.Font.body).foregroundStyle(Theme.Palette.textSecondary)
+                .frame(width: 104, alignment: .leading)
+            TextField(label, text: text, prompt: Text(prompt))
+                .textFieldStyle(.roundedBorder)
+                .font(Theme.Font.mono)
+                .labelsHidden()
+                .onSubmit { save(current()) }
+        }
+    }
+
+    private func load() {
+        guard let s = document.serverDHCP(device.id) else { return }
+        network = s.network
+        mask = Self.mask(s.prefixLen)
+        gateway = s.gateway ?? ""
+        dns = s.dns ?? ""
+        start = s.start
+    }
+
+    /// Turning it on suggests settings from the server's own address.
+    private func enable() {
+        let parts = (device.ip?.address ?? "192.168.1.10").split(separator: ".")
+        let base = parts.prefix(3).joined(separator: ".")
+        network = "\(base).0"
+        mask = device.ip?.mask ?? "255.255.255.0"
+        gateway = device.ip?.gateway ?? ""
+        start = "\(base).100"
+        save(current())
+    }
+
+    private func current() -> ServerDhcp? {
+        guard let prefix = Self.prefix(mask) else { return nil }
+        return ServerDhcp(network: network, prefixLen: prefix, gateway: gateway.isEmpty ? nil : gateway,
+                          dns: dns.isEmpty ? nil : dns, start: start)
+    }
+
+    private func save(_ service: ServerDhcp?) {
+        if case .failure(let error) = document.setServerDHCP(device.id, service, undoManager: undoManager) {
+            workspace.flash(error.message)
+        } else {
+            load()
+        }
+    }
+
+    static func prefix(_ mask: String) -> UInt8? {
+        let octets = mask.split(separator: ".").compactMap { UInt8($0) }
+        guard octets.count == 4 else { return nil }
+        let bits = octets.reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        let ones = bits.nonzeroBitCount
+        return bits == (ones == 0 ? 0 : UInt32.max << (32 - ones)) ? UInt8(ones) : nil
+    }
+
+    static func mask(_ prefix: UInt8) -> String {
+        let bits = prefix == 0 ? UInt32(0) : UInt32.max << (32 - UInt32(prefix))
+        return (0..<4).map { String((bits >> (24 - 8 * $0)) & 0xff) }.joined(separator: ".")
     }
 }

@@ -356,7 +356,7 @@ struct DeviceContextMenu: View {
             Button("Start") { workspace.setPower(.running, for: targets) }
             Button("Suspend") { workspace.setPower(.suspended, for: targets) }
             Button("Stop") { workspace.setPower(.stopped, for: targets) }
-            Button("Reload") { workspace.setPower(.running, for: targets) }
+            Button("Reload") { workspace.reload(targets) }
         }
         Divider()
         Button("Open Console", systemImage: "terminal") { workspace.openConsole(for: device.id) }

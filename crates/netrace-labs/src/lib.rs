@@ -15,7 +15,7 @@ use netrace_sim::SimTime;
 
 mod bundled;
 
-pub use bundled::{BundledLab, bundled_labs};
+pub use bundled::{BundledLab, bundled_labs, tour_json};
 
 /// What one check found.
 #[derive(Debug, Clone, PartialEq, Eq)]

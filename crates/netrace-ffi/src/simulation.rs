@@ -217,6 +217,11 @@ impl Simulation {
             .host_command(doc::DeviceId(device), &line, SimTime::from_nanos(at_ns))
     }
 
+    /// Every frame that crossed a cable, as a libpcap file for Wireshark.
+    pub fn pcap(&self, link_id: u64) -> Vec<u8> {
+        engine::pcap(self.lock().trace(), doc::LinkId(link_id))
+    }
+
     pub fn trace(&self) -> Vec<TraceEventInfo> {
         self.lock()
             .trace()
@@ -672,7 +677,7 @@ impl Simulation {
             .project()
             .devices()
             .iter()
-            .filter(|d| d.kind.has_cli())
+            .filter(|d| d.kind.has_cli() || d.kind == doc::DeviceKind::Server)
         {
             if !d.config.dhcp_pools.is_empty() {
                 let pools: Vec<String> =

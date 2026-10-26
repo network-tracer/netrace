@@ -1,11 +1,11 @@
 //! Switching commands: VLANs, access and trunk ports, spanning tree, port
-//! security, CDP / LLDP, and their `show` output.
+//! security, CDP / LLDP, SPAN, and their `show` output.
 
 use std::fmt::Write;
 
 use netrace_doc::{
-    Device, DeviceKind, PortMode, PortSecurity, Project, StpMode, SwitchportConfig, Violation,
-    VlanConfig, VlanSet,
+    Device, DeviceKind, MonitorSession, PortMode, PortSecurity, Project, SpanDirection, StpMode,
+    SwitchportConfig, Violation, VlanConfig, VlanSet,
 };
 use netrace_engine::{
     Layer2, Network, abbreviate_port, discovery_neighbors, interface_rows, natural_key,
@@ -265,6 +265,55 @@ impl Session {
                 self.update(project, |c| c.cdp_run = id == "cdp-run");
                 String::new()
             }
+            "span-source" | "span-source-both" | "span-source-rx" | "span-source-tx"
+            | "span-destination" => {
+                let session = num?;
+                let port = values.iter().find_map(|v| match v {
+                    Value::Iface(n) => Some(n.clone()),
+                    _ => None,
+                })?;
+                if !kind.has_port(&port) {
+                    return Some("% Invalid interface: SPAN uses physical ports.".into());
+                }
+                let current = device.config.monitor_sessions.get(&session);
+                if id == "span-destination" {
+                    if current.is_some_and(|m| m.sources.iter().any(|(p, _)| *p == port)) {
+                        return Some(format!(
+                            "% {} is already a source in session {session}.",
+                            abbreviate_port(&port)
+                        ));
+                    }
+                    self.update(project, |c| {
+                        c.monitor_sessions.entry(session).or_default().destination = Some(port);
+                    });
+                } else {
+                    if current.is_some_and(|m| m.destination.as_deref() == Some(port.as_str())) {
+                        return Some(format!(
+                            "% {} is already the destination of session {session}.",
+                            abbreviate_port(&port)
+                        ));
+                    }
+                    let direction = match id {
+                        "span-source-rx" => SpanDirection::Rx,
+                        "span-source-tx" => SpanDirection::Tx,
+                        _ => SpanDirection::Both,
+                    };
+                    self.update(project, |c| {
+                        let m = c.monitor_sessions.entry(session).or_default();
+                        m.sources.retain(|(p, _)| *p != port);
+                        m.sources.push((port, direction));
+                    });
+                }
+                String::new()
+            }
+            "no-span" => {
+                let session = num?;
+                self.update(project, |c| {
+                    c.monitor_sessions.remove(&session);
+                });
+                String::new()
+            }
+            "show-monitor" => monitor(&device),
             "lldp-run" | "no-lldp-run" => {
                 self.update(project, |c| c.lldp_run = id == "lldp-run");
                 String::new()
@@ -896,4 +945,67 @@ fn capitalised(text: &str) -> String {
         .next()
         .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
         .unwrap_or_default()
+}
+
+/// `show monitor`: each SPAN session, as IOS lists it.
+fn monitor(device: &Device) -> String {
+    let mut out = String::new();
+    for (
+        n,
+        MonitorSession {
+            sources,
+            destination,
+        },
+    ) in &device.config.monitor_sessions
+    {
+        let ports = |dir: fn(SpanDirection) -> bool| {
+            let list: Vec<String> = sources
+                .iter()
+                .filter(|(_, d)| dir(*d))
+                .map(|(p, _)| abbreviate_port(p))
+                .collect();
+            if list.is_empty() {
+                "None".to_string()
+            } else {
+                list.join(",")
+            }
+        };
+        let both: Vec<String> = sources
+            .iter()
+            .filter(|(_, d)| *d == SpanDirection::Both)
+            .map(|(p, _)| abbreviate_port(p))
+            .collect();
+        let _ = writeln!(out, "Session {n}\n---------");
+        let _ = writeln!(out, "Type                   : Local Session");
+        let _ = writeln!(out, "Source Ports           :");
+        let _ = writeln!(
+            out,
+            "    RX Only            : {}",
+            ports(|d| d == SpanDirection::Rx)
+        );
+        let _ = writeln!(
+            out,
+            "    TX Only            : {}",
+            ports(|d| d == SpanDirection::Tx)
+        );
+        let _ = writeln!(
+            out,
+            "    Both               : {}",
+            if both.is_empty() {
+                "None".into()
+            } else {
+                both.join(",")
+            }
+        );
+        let _ = writeln!(
+            out,
+            "Destination Ports      : {}",
+            destination
+                .as_deref()
+                .map(abbreviate_port)
+                .unwrap_or_else(|| "None".into())
+        );
+        let _ = writeln!(out, "    Encapsulation      : Native\n");
+    }
+    out
 }

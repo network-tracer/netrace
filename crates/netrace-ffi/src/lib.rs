@@ -13,11 +13,13 @@ uniffi::setup_scaffolding!();
 mod console;
 mod labs;
 mod simulation;
+mod snapshots;
 mod style;
 mod views;
 pub use console::*;
 pub use labs::*;
 pub use simulation::*;
+pub use snapshots::*;
 pub use style::*;
 pub use views::*;
 
@@ -93,6 +95,34 @@ pub struct DeviceInfo {
     pub group: Option<u64>,
     /// The lab locks it: look, don't change.
     pub locked: bool,
+    pub power: DevicePower,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
+pub enum DevicePower {
+    On,
+    Suspended,
+    Off,
+}
+
+impl From<doc::Power> for DevicePower {
+    fn from(p: doc::Power) -> Self {
+        match p {
+            doc::Power::On => DevicePower::On,
+            doc::Power::Suspended => DevicePower::Suspended,
+            doc::Power::Off => DevicePower::Off,
+        }
+    }
+}
+
+impl From<DevicePower> for doc::Power {
+    fn from(p: DevicePower) -> Self {
+        match p {
+            DevicePower::On => doc::Power::On,
+            DevicePower::Suspended => doc::Power::Suspended,
+            DevicePower::Off => doc::Power::Off,
+        }
+    }
 }
 
 /// An end device's IPv4 settings. `mask` is derived from `prefix_len` and
@@ -191,6 +221,38 @@ pub struct LinkInfo {
     pub medium: Medium,
     pub color: Option<Swatch>,
     pub line: Option<LinePattern>,
+    pub conditioning: LinkConditioning,
+}
+
+/// Delay, jitter, loss and bandwidth the simulation applies to a cable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Record)]
+pub struct LinkConditioning {
+    pub latency_ms: u32,
+    pub jitter_ms: u32,
+    pub loss_percent: u8,
+    pub bandwidth_kbps: Option<u32>,
+}
+
+impl From<doc::Conditioning> for LinkConditioning {
+    fn from(c: doc::Conditioning) -> Self {
+        LinkConditioning {
+            latency_ms: c.latency_ms,
+            jitter_ms: c.jitter_ms,
+            loss_percent: c.loss_percent,
+            bandwidth_kbps: c.bandwidth_kbps,
+        }
+    }
+}
+
+impl From<LinkConditioning> for doc::Conditioning {
+    fn from(c: LinkConditioning) -> Self {
+        doc::Conditioning {
+            latency_ms: c.latency_ms,
+            jitter_ms: c.jitter_ms,
+            loss_percent: c.loss_percent,
+            bandwidth_kbps: c.bandwidth_kbps,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -691,6 +753,7 @@ impl From<&doc::Device> for DeviceInfo {
             color: d.color.map(Into::into),
             group: d.group.map(|g| g.0),
             locked: false,
+            power: d.power.into(),
         }
     }
 }
@@ -708,6 +771,7 @@ impl From<DeviceInfo> for doc::Device {
             group: d.group.map(doc::GroupId),
             config: doc::DeviceConfig::default(),
             startup: None,
+            power: d.power.into(),
         }
     }
 }
@@ -739,6 +803,7 @@ impl From<&doc::Link> for LinkInfo {
             medium: l.medium.into(),
             color: l.color.map(Into::into),
             line: l.line.map(Into::into),
+            conditioning: l.conditioning.into(),
         }
     }
 }
@@ -752,6 +817,7 @@ impl From<LinkInfo> for doc::Link {
             medium: l.medium.into(),
             color: l.color.map(Into::into),
             line: l.line.map(Into::into),
+            conditioning: l.conditioning.into(),
         }
     }
 }

@@ -77,6 +77,38 @@ impl Network {
             Payload::Bpdu(_) => return,
             _ => {}
         }
+        if frame.dst != iface.mac
+            && !frame.dst.is_broadcast()
+            && self.on_span_port(id, &arrival.port)
+        {
+            let layers = vec![
+                arrived,
+                explain::data_link(
+                    LayerRole::Used,
+                    "Not addressed to it, but the card listens to everything on a monitoring port, as Wireshark \
+                     does in promiscuous mode."
+                        .to_string(),
+                    &frame,
+                ),
+            ];
+            let summary = format!(
+                "{name} captures a mirrored copy of a frame from {} to {}: the switch's SPAN session sends it a copy \
+                 of the traffic it monitors.",
+                self.who(frame.src),
+                self.who(frame.dst)
+            );
+            self.record(
+                now,
+                id,
+                Some(&arrival),
+                Some(frame),
+                Outcome::Accepted,
+                summary,
+                layers,
+                Vec::new(),
+            );
+            return;
+        }
         if frame.dst != iface.mac && !frame.dst.is_broadcast() {
             let layers = vec![
                 arrived,
@@ -1529,5 +1561,14 @@ fn icmp_note(packet: &Ipv4Packet) -> String {
         IcmpKind::Unreachable(_) => {
             "Destination unreachable: tells the sender there's no way through.".into()
         }
+    }
+}
+
+impl Network {
+    /// Whether a host's `port` is cabled to a switch's SPAN destination port.
+    fn on_span_port(&self, id: DeviceId, port: &str) -> bool {
+        self.wires
+            .get(&(id, port.to_string()))
+            .is_some_and(|(peer, peer_port, _)| self.span_destination(*peer, peer_port))
     }
 }

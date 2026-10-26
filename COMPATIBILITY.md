@@ -34,6 +34,7 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 | `spanning-tree mode`, `vlan N priority`, `root primary/secondary`, `portfast`, `bpduguard` | ✅ | | | Converged tree, no timers |
 | `switchport port-security ...` | ✅ | | | Sticky MACs aren't written back to the running-config |
 | `cdp run`, `cdp enable`, `lldp run` | ✅ | | | |
+| `monitor session N source interface X [both/rx/tx]`, `monitor session N destination interface Y`, `no monitor session N` | ✅ | | | Local SPAN on switches; copies leave untagged; the destination port takes no traffic in |
 | `ip default-gateway`, `ip routing`, `no switchport` | ✅ | | | |
 | `ip dhcp pool`, `network`, `default-router`, `dns-server`, `domain-name`, `ip dhcp excluded-address` | ✅ | | | No lease timers: leases last for the run |
 | `ip helper-address` | ✅ | | | Relays DHCP only |
@@ -63,6 +64,7 @@ Verified: blank until checked; then the IOS version / Packet Tracer version it w
 | `show spanning-tree [vlan N]` | ✅ | | |
 | `show cdp neighbors [detail]`, `show lldp neighbors` | ✅ | | |
 | `show port-security [interface X/address]` | ✅ | | |
+| `show monitor` | ✅ | | |
 | `show version` | 🟡 | | | Simulated platform text |
 
 ## EXEC actions

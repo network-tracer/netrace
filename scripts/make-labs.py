@@ -837,3 +837,141 @@ def main():
 
 
 main()
+
+
+# The showcase network the intro tour walks through: "The Shadow Network",
+# a multi-agency VLAN operation with every feature from M1-M6 configured
+# and working. Written to examples/tour.netrace.
+def tour():
+    t = Topology()
+    any_ = {"address": "0.0.0.0", "wildcard": "255.255.255.255"}
+    L3 = "GigabitEthernet1/0/"
+    agencies = [  # VLAN, name, switch, centre of its zone, swatch, hosts
+        (10, "CYBERSECURITY", "SW-CYBER", (460, 270), "blue", [("pc", "IDS-IPS"), ("pc", "SOC-1")]),
+        (20, "COUNTER-TERROR", "SW-CT", (1140, 270), "red", [("pc", "THREAT-MON"), ("laptop", "SECURE-LINK")]),
+        (30, "INTERNAL-AFFAIRS", "SW-IA", (460, 620), "yellow", [("pc", "AUDITOR"), ("server", "PERSONNEL")]),
+        (40, "FIELD-OPS", "SW-FIELD", (1140, 620), "green", [("laptop", "TAC-TEAM"), ("pc", "GPS-TRACK")]),
+    ]
+    vlans = {str(v): {"name": n} for v, n, *_ in agencies}
+    vlans.update({"50": {"name": "DATA-CENTER"}, "99": {"name": "WATCHERS"}})
+    trunk_ = {"switchport": {"mode": "trunk"}}
+
+    # The edge: the ISP's cloud and a firewall doing PAT and originating
+    # the default route into OSPF.
+    isp = t.add("cloud", "ISP", 735, 115, config=router({
+        "Ethernet0": iface("203.0.113.2/30"), "Ethernet1": iface("198.51.100.1/24")}))
+    intel = t.add("server", "THREAT-INTEL", 865, 115, ip="198.51.100.10/24", gateway="198.51.100.1")
+    fw = t.add("firewall", "FW", 800, 245, config=router({
+        "GigabitEthernet1/1": iface("203.0.113.1/30", nat="outside", description="ISP"),
+        "GigabitEthernet1/2": iface("10.0.0.1/30", nat="inside", description="CORE"),
+    },
+        routes=[{"network": "0.0.0.0", "prefix_len": 0, "target": {"next_hop": "203.0.113.2"}, "distance": 1}],
+        ospf=[{"process_id": 1, "router_id": "1.1.1.1", "default_originate": True,
+               "networks": [{"address": "10.0.0.0", "wildcard": "0.255.255.255", "area": 0}]}],
+        access_lists=[{"name": "1", "kind": "standard", "remarks": ["Agency networks allowed out"], "entries": [
+            {"sequence": 10, "action": "permit", "protocol": "ip",
+             "source": {"address": "10.0.0.0", "wildcard": "0.255.255.255"}, "destination": any_},
+        ]}],
+        nat_rules=[{"dynamic": {"acl": "1", "target": {"interface": "GigabitEthernet1/1"}, "overload": True}}]))
+
+    # The core: a layer 3 switch routing between the VLANs, root of every
+    # spanning tree, DHCP server for the agencies, the access list keeping
+    # Field Ops out of personnel data, and a SPAN session for the Watchers.
+    core_ifaces = {
+        L3 + "24": iface("10.0.0.2/30", switchport={"routed": True}, description="FW"),
+        L3 + "20": iface(switchport={"mode": "access", "access_vlan": 99}, description="WATCHERS (SPAN)"),
+    }
+    for n, (v, name, sw, *_rest) in enumerate(agencies, start=1):
+        core_ifaces[L3 + str(n)] = dict(trunk_, shutdown=False, description=sw)
+        core_ifaces[f"Vlan{v}"] = iface(f"10.{v}.{v}.1/24", description=name)
+    core_ifaces[L3 + "5"] = dict(trunk_, shutdown=False, description="SW-DATA")
+    core_ifaces["Vlan50"] = iface("10.50.50.1/24", description="DATA-CENTER")
+    core_ifaces["Vlan40"]["acl_in"] = "140"
+    core = t.add("l3_switch", "CORE", 800, 420, config={
+        "ip_routing": True,
+        "vlans": vlans,
+        "interfaces": core_ifaces,
+        "spanning_tree": {"mode": "rapid_pvst", "priorities": {v: 4096 for v in ["1", "10", "20", "30", "40", "50", "99"]}},
+        "dhcp_pools": [{"name": name, "network": [f"10.{v}.{v}.0", 24], "default_router": f"10.{v}.{v}.1",
+                        "dns_server": "10.50.50.10", "domain_name": "shadow.net"} for v, name, *_ in agencies],
+        "dhcp_excluded": [[f"10.{v}.{v}.1", f"10.{v}.{v}.49"] for v, *_ in agencies],
+        "access_lists": [{"name": "140", "kind": "extended",
+                          "remarks": ["Field Ops may not open personnel records"], "entries": [
+            {"sequence": 10, "action": "deny", "protocol": "ip",
+             "source": {"address": "10.40.40.0", "wildcard": "0.0.0.255"},
+             "destination": {"address": "10.30.30.20", "wildcard": "0.0.0.0"}},
+            {"sequence": 20, "action": "permit", "protocol": "ip", "source": any_, "destination": any_},
+        ]}],
+        "ospf": [{"process_id": 1, "router_id": "2.2.2.2",
+                  "networks": [{"address": "10.0.0.0", "wildcard": "0.255.255.255", "area": 0}],
+                  "passive": [f"Vlan{v}" for v in [10, 20, 30, 40, 50]]}],
+        "monitor_sessions": {"1": {"sources": [[L3 + "3", "both"]], "destination": L3 + "20"}},
+    })
+    watcher = t.add("pc", "WATCHER", 150, 440, ip="10.99.99.10/24", gateway="10.99.99.1")
+    t.cable(isp, "Ethernet0", fw, "GigabitEthernet1/1")
+    t.cable(isp, "Ethernet1", intel, "GigabitEthernet0")
+    t.cable(fw, "GigabitEthernet1/2", core, L3 + "24")
+    t.cable(core, L3 + "20", watcher, "FastEthernet0")
+
+    # Each agency: an access switch trunked to the core, its workstations
+    # on DHCP behind port security (MAC filtering), its servers addressed.
+    psec = {"enabled": True, "maximum": 1, "sticky": True, "violation": "restrict"}
+    for n, (v, name, sw_name, (cx, cy), _, hosts) in enumerate(agencies, start=1):
+        ports = {"GigabitEthernet0/1": trunk_, "GigabitEthernet0/2": trunk_}
+        for k, (kind, _) in enumerate(hosts, start=1):
+            port = {"mode": "access", "access_vlan": v, "portfast": True}
+            if kind != "server":
+                port["port_security"] = psec
+            ports[F + str(k)] = {"switchport": port}
+        sw = t.add("l2_switch", sw_name, cx, cy - 55, config={"vlans": vlans, "interfaces": ports})
+        t.cable(core, L3 + str(n), sw, "GigabitEthernet0/1")
+        for k, (kind, host) in enumerate(hosts, start=1):
+            x = cx + (-75 if k == 1 else 75)
+            if kind == "server":
+                h = t.add(kind, host, x, cy + 50, ip=f"10.{v}.{v}.20/24", gateway=f"10.{v}.{v}.1")
+            else:
+                h = t.add(kind, host, x, cy + 50, dhcp=True)
+            t.cable(sw, F + str(k), h, "GigabitEthernet0" if kind == "server" else "FastEthernet0")
+    # A second path between two agencies: spanning tree blocks one end.
+    t.cable(t.id("SW-IA"), "GigabitEthernet0/2", t.id("SW-FIELD"), "GigabitEthernet0/2")
+
+    # The data centre everyone reaches.
+    data = t.add("l2_switch", "SW-DATA", 800, 755, config={"vlans": vlans, "interfaces": {
+        "GigabitEthernet0/1": trunk_,
+        F + "1": {"switchport": {"mode": "access", "access_vlan": 50, "portfast": True}},
+        F + "2": {"switchport": {"mode": "access", "access_vlan": 50, "portfast": True}}}})
+    vault = t.add("server", "VAULT", 725, 860, ip="10.50.50.10/24", gateway="10.50.50.1")
+    apps = t.add("server", "APPS", 875, 860, ip="10.50.50.20/24", gateway="10.50.50.1")
+    t.cable(core, L3 + "5", data, "GigabitEthernet0/1")
+    t.cable(data, F + "1", vault, "GigabitEthernet0")
+    t.cable(data, F + "2", apps, "GigabitEthernet0")
+
+    project = t.project(None)
+    del project["lab"]
+
+    def zone(cx, cy, w, h, text, swatch, sides, line="solid"):
+        return {"id": t._id(), "kind": "area",
+                "rect": {"x": cx - w / 2, "y": cy - h / 2, "width": w, "height": h}, "text": text,
+                "style": {"shape": {"kind": "polygon", "sides": sides}, "stroke": swatch, "fill": swatch,
+                          "fill_opacity": 0.16, "line": line, "label": swatch}}
+    project["annotations"] = [
+        zone(800, 165, 330, 270, "EDGE  ·  FIREWALL", "gray", 6),
+        zone(800, 425, 230, 200, "CORE", "teal", 8),
+        *[zone(cx, cy, 330, 290, f"VLAN {v}  ·  {name}", swatch, 6) for v, name, _, (cx, cy), swatch, _ in agencies],
+        zone(800, 805, 360, 260, "VLAN 50  ·  DATA-CENTER", "orange", 6),
+        zone(150, 440, 220, 200, "VLAN 99  ·  WATCHERS", "purple", 5, line="dashed"),
+        {"id": t._id(), "kind": "note", "rect": {"x": 20.0, "y": 30.0, "width": 320.0, "height": 150.0},
+         "text": "THE SHADOW NETWORK\nA multi-agency VLAN operation with everything netrace simulates: VLANs and "
+                 "trunks, rapid spanning tree, inter-VLAN routing on the core, DHCP, port security, an access "
+                 "list, OSPF, PAT through the firewall, TCP, and a SPAN session the Watchers listen on. "
+                 "Help > Take the Tour walks you through the app on it."},
+    ]
+    project["next_id"] = t.next_id
+    with open("examples/tour.netrace/project.json", "w") as f:
+        json.dump(project, f, indent=2)
+        f.write("\n")
+    print("examples/tour.netrace")
+
+
+os.makedirs("examples/tour.netrace", exist_ok=True)
+tour()

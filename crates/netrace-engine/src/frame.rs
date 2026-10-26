@@ -329,7 +329,7 @@ pub enum Payload {
 }
 
 /// An Ethernet II frame. Kept structured rather than as bytes: the inspector
-/// shows fields, and nothing in the simulation needs the wire encoding.
+/// shows fields, and only capture export needs the wire encoding (`pcap.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Frame {
     pub src: MacAddr,
@@ -370,10 +370,14 @@ impl Frame {
         tag + match self.payload {
             // 14-byte header + 28-byte ARP, padded to the 60-byte minimum.
             Payload::Arp(_) | Payload::Bpdu(_) => 60,
-            // Ethernet 14 + IPv4 20 + OSPF hello or a small LS Update.
+            // Ethernet 14 + IPv4 20 + OSPF header 24 + a hello, or an LS
+            // Update's count and LSA headers.
             Payload::Ipv4(Ipv4Packet {
                 l4: L4::Ospf(o), ..
-            }) => 14 + 20 + 44 + 24 * o.lsas as usize,
+            }) => match o.message {
+                OspfMessage::Hello => 14 + 20 + 24 + 20,
+                OspfMessage::LsUpdate => 14 + 20 + 24 + 4 + 24 * o.lsas as usize,
+            },
             // Errors quote the original IP header and 8 bytes of it.
             Payload::Ipv4(ip) if ip.is_icmp_error() => 14 + 20 + 8 + 28,
             // Ethernet 14 + IPv4 20 + UDP 8 + a minimal DHCP message.

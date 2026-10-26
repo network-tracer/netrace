@@ -19,6 +19,7 @@ mod mac;
 mod nat;
 mod network;
 mod ospf;
+mod pcap;
 mod probe;
 mod report;
 mod routing;
@@ -45,6 +46,7 @@ pub use ospf::{
     Lsa, LsaKind, NeighborState, OSPF_DISTANCE, Ospf, OspfChange, OspfIfState, OspfIface,
     OspfNeighbor, OspfNetType, OspfRoute, OspfRouteKind, OspfRouter, OspfSegment,
 };
+pub use pcap::pcap;
 pub use probe::{
     MAX_HOPS, PROBES_PER_HOP, PingFailure, PingSession, Probe, ProbeResult, ReportStyle,
     SessionKind,

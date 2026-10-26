@@ -1,5 +1,5 @@
 //! Switching configuration: VLANs, access and trunk ports, spanning tree,
-//! port security, CDP and LLDP.
+//! port security, CDP and LLDP, and SPAN port mirroring.
 
 use std::collections::BTreeMap;
 
@@ -344,5 +344,53 @@ mod tests {
         assert!(port.carries(20) && !port.carries(30));
         assert_eq!(port.untagged_vlan(), 1);
         assert!(SwitchportConfig::default().is_default());
+    }
+}
+
+/// `monitor session N`: local SPAN, copying the frames seen on source ports
+/// out a destination port, where a capture host listens.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MonitorSession {
+    /// Source ports (full names) and which direction of each is copied.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<(String, SpanDirection)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+impl MonitorSession {
+    /// Whether frames arriving on (`rx`) or leaving (`!rx`) `port` are copied.
+    pub fn mirrors(&self, port: &str, rx: bool) -> bool {
+        self.sources
+            .iter()
+            .any(|(p, d)| p == port && if rx { d.rx() } else { d.tx() })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpanDirection {
+    #[default]
+    Both,
+    Rx,
+    Tx,
+}
+
+impl SpanDirection {
+    pub fn ios(self) -> &'static str {
+        match self {
+            SpanDirection::Both => "both",
+            SpanDirection::Rx => "rx",
+            SpanDirection::Tx => "tx",
+        }
+    }
+
+    pub fn rx(self) -> bool {
+        self != SpanDirection::Tx
+    }
+
+    pub fn tx(self) -> bool {
+        self != SpanDirection::Rx
     }
 }

@@ -7,6 +7,10 @@ struct WorkspaceCommands: Commands {
     @FocusedObject private var simulation: SimulationController?
 
     var body: some Commands {
+        CommandGroup(before: .help) {
+            Button("Take the Tour") { workspace?.tourRequests += 1 }
+                .disabled(workspace == nil)
+        }
         CommandGroup(after: .newItem) {
             Button("New from Lab…") { workspace?.showsLabBrowser = true }
                 .keyboardShortcut("n", modifiers: [.command, .option])

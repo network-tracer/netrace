@@ -1,7 +1,7 @@
 //! What switches do with frames: VLAN membership and 802.1Q tags,
 //! spanning-tree port states, port security, MAC learning, forwarding and
-//! flooding within a VLAN, and frames to and from their own `Vlan`
-//! interfaces.
+//! flooding within a VLAN, frames to and from their own `Vlan`
+//! interfaces, and SPAN copies to a monitor port.
 
 use std::time::Duration;
 
@@ -34,6 +34,18 @@ impl Network {
         let p = abbreviate_port(&ingress);
         let key: PortKey = (id, ingress.clone());
 
+        if self.span_destination(id, &ingress) {
+            return self.switch_drop(
+                now,
+                id,
+                &arrival,
+                frame,
+                format!(
+                    "{name} receives the frame on {p}, but {p} is a SPAN destination port: it only sends mirrored \
+                     copies, and doesn't take traffic in."
+                ),
+            );
+        }
         let vlan = match self.ingress_vlan(id, &ingress, &frame) {
             Ok(vlan) => vlan,
             Err(Refusal::Dropped(reason)) => {
@@ -154,6 +166,18 @@ impl Network {
         if deliver_to_self {
             self.deliver_internally(id, vlan, frame.tagged(None), arrival.tag);
         }
+        let mirrored = self.mirror(id, Some(&ingress), &egress, &frame, arrival.tag);
+        let span_note = mirrored
+            .iter()
+            .map(|(n, port)| {
+                format!(
+                    " SPAN session {n} copies it out {} to the monitoring port.",
+                    abbreviate_port(port)
+                )
+            })
+            .collect::<String>();
+        let mut egress = egress;
+        egress.extend(mirrored.into_iter().map(|(_, port)| port));
         let tag_note = match (frame.vlan, tagging.first()) {
             (None, Some((_, Some(t)))) => {
                 format!(" An 802.1Q tag for VLAN {t} is added on the trunk.")
@@ -194,7 +218,7 @@ impl Network {
             Some(&arrival),
             Some(frame),
             outcome,
-            format!("{learned}. {decision}{tag_note}"),
+            format!("{learned}. {decision}{tag_note}{span_note}"),
             layers,
             egress,
         );
@@ -343,6 +367,7 @@ impl Network {
             .filter(|port| {
                 let key = (id, port.clone());
                 !self.psec_disabled.contains(&key)
+                    && !self.span_destination(id, port)
                     && self.switchport(id, port).is_some_and(|sp| sp.carries(vlan))
                     && self.l2.forwards(id, port, vlan)
             })
@@ -429,7 +454,48 @@ impl Network {
             let out = frame.tagged(self.egress_tag(id, port, vlan));
             self.transmit(id, port, out, tag);
         }
+        let mirrored = self.mirror(id, None, &egress, &frame, tag);
+        let mut egress = egress;
+        egress.extend(mirrored.into_iter().map(|(_, port)| port));
         egress
+    }
+
+    pub(crate) fn span_destination(&self, id: DeviceId, port: &str) -> bool {
+        self.project
+            .device(id)
+            .is_some_and(|d| d.config.span_destination(port))
+    }
+
+    /// SPAN: copies a frame, untagged, out each monitor session's
+    /// destination port when it arrived on (`ingress`) or left by (`egress`)
+    /// one of the session's source ports. Returns the sessions and
+    /// destination ports used.
+    fn mirror(
+        &mut self,
+        id: DeviceId,
+        ingress: Option<&str>,
+        egress: &[String],
+        frame: &Frame,
+        tag: Option<u64>,
+    ) -> Vec<(u16, String)> {
+        let Some(device) = self.project.device(id) else {
+            return Vec::new();
+        };
+        let copies: Vec<(u16, String)> = device
+            .config
+            .monitor_sessions
+            .iter()
+            .filter_map(|(n, m)| {
+                let dest = m.destination.clone()?;
+                let seen = ingress.is_some_and(|p| p != dest && m.mirrors(p, true))
+                    || egress.iter().any(|p| m.mirrors(p, false));
+                seen.then_some((*n, dest))
+            })
+            .collect();
+        for (_, dest) in &copies {
+            self.transmit(id, dest, frame.tagged(None), tag);
+        }
+        copies
     }
 
     fn deliver_internally(&mut self, id: DeviceId, vlan: u16, frame: Frame, tag: Option<u64>) {

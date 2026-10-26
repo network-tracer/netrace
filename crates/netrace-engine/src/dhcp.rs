@@ -406,8 +406,11 @@ impl Network {
             return;
         }
 
-        // To a server (port 67).
-        if stack.kind == StackKind::Host {
+        // To a server (port 67): routers, and servers running the DHCP service.
+        let serves = self.project.device(id).is_some_and(|d| {
+            d.kind == netrace_doc::DeviceKind::Server && !d.config.dhcp_pools.is_empty()
+        });
+        if stack.kind == StackKind::Host && !serves {
             let summary = format!(
                 "{name} isn't a DHCP server, so it ignores the DHCP {}.",
                 d.op.name()

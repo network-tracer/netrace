@@ -2655,3 +2655,250 @@ fn each_switched_island_elects_its_own_root() {
             .contains("Reply from 192.168.4.25")
     );
 }
+
+#[test]
+fn switched_off_devices_take_their_links_down() {
+    let (mut p, [r1, r2, r3], pc1, _) = triangle();
+    for r in [r1, r2, r3] {
+        ospf_on(&mut p, r, &[]);
+    }
+    // R3 off: R1 loses its neighbour and reaches PC3's network no more.
+    p.set_power(r3, netrace_doc::Power::Off).unwrap();
+    let mut net = Network::new(p.clone());
+    let neighbors = net
+        .ospf()
+        .router(r1)
+        .unwrap()
+        .neighbors
+        .iter()
+        .filter(|n| n.state == crate::NeighborState::Full)
+        .count();
+    assert_eq!(neighbors, 1);
+    let s = net
+        .ping(pc1, ip("192.168.3.10"), 4, net.end_time())
+        .unwrap();
+    assert!(
+        !net.session_report(s)
+            .unwrap()
+            .contains("Reply from 192.168.3.10")
+    );
+    // A stopped PC can't send at all.
+    p.set_power(r3, netrace_doc::Power::On).unwrap();
+    p.set_power(pc1, netrace_doc::Power::Off).unwrap();
+    let mut net = Network::new(p.clone());
+    assert!(net.ping(pc1, ip("192.168.3.10"), 1, SimTime::ZERO).is_err());
+    // Suspended: links stay up, but R2 forwards nothing.
+    p.set_power(pc1, netrace_doc::Power::On).unwrap();
+    p.set_power(r2, netrace_doc::Power::Suspended).unwrap();
+    let net = Network::new(p);
+    assert!(
+        crate::interface_rows(net.project(), r1)
+            .iter()
+            .find(|r| r.name == "GigabitEthernet0/0")
+            .unwrap()
+            .is_up()
+    );
+}
+
+#[test]
+fn link_conditioning_delays_and_drops_frames() {
+    let (mut p, r1, pc1, pc2) = two_lans();
+    no_shutdown(&mut p, r1);
+    let link = p
+        .links()
+        .iter()
+        .find(|l| l.a.device == r1 && l.b.device == pc2 || l.b.device == r1 && l.a.device == pc2)
+        .unwrap()
+        .id;
+    p.set_link_conditioning(
+        link,
+        netrace_doc::Conditioning {
+            latency_ms: 100,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut net = Network::new(p.clone());
+    let s = net.ping(pc1, ip("192.168.2.10"), 4, SimTime::ZERO).unwrap();
+    let report = net.session_report(s).unwrap();
+    // 100 ms each way across the conditioned cable.
+    assert!(report.contains("time=20"), "{report}");
+
+    p.set_link_conditioning(
+        link,
+        netrace_doc::Conditioning {
+            loss_percent: 100,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut net = Network::new(p.clone());
+    let s = net.ping(pc1, ip("192.168.2.10"), 2, SimTime::ZERO).unwrap();
+    assert!(
+        !net.session_report(s)
+            .unwrap()
+            .contains("Reply from 192.168.2.10")
+    );
+    assert!(
+        net.trace()
+            .iter()
+            .any(|e| e.summary.contains("lost on the cable"))
+    );
+
+    // Partial loss is random but replays identically.
+    p.set_link_conditioning(
+        link,
+        netrace_doc::Conditioning {
+            loss_percent: 40,
+            jitter_ms: 30,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let run = |p: &Project| {
+        let mut net = Network::new(p.clone());
+        let s = net
+            .ping(pc1, ip("192.168.2.10"), 10, SimTime::ZERO)
+            .unwrap();
+        net.session_report(s).unwrap()
+    };
+    assert_eq!(run(&p), run(&p));
+}
+
+#[test]
+fn servers_can_hand_out_addresses() {
+    let (mut p, _sw, pc1, pc2, _pc3) = office();
+    let srv = p.add_device(DeviceKind::Server, Point::default()).id;
+    p.set_host_ip(srv, Some(HostIp::new(ip("192.168.1.2"), 24, None).unwrap()))
+        .unwrap();
+    let sw = _sw;
+    p.connect(
+        end(sw, "FastEthernet0/10"),
+        end(srv, "GigabitEthernet0"),
+        Medium::Copper,
+    )
+    .unwrap();
+    p.set_host_dhcp(pc1, true).unwrap();
+    let mut pool = netrace_doc::DhcpPool::new("serverPool");
+    pool.network = Some((ip("192.168.1.0"), 24));
+    pool.default_router = Some(ip("192.168.1.1"));
+    p.set_server_dhcp(
+        srv,
+        Some((pool, vec![(ip("192.168.1.1"), ip("192.168.1.99"))])),
+    )
+    .unwrap();
+    let net = Network::new(p);
+    let (address, ..) = net.current_address(pc1).unwrap();
+    assert_eq!(address, ip("192.168.1.100"));
+    let _ = pc2;
+}
+
+#[test]
+fn firewalls_and_the_internet_cloud_route_like_routers() {
+    let mut p = Project::new();
+    let fw = p.add_device(DeviceKind::Firewall, Point::default()).id;
+    let isp = p.add_device(DeviceKind::Cloud, Point::default()).id;
+    let pc = host(&mut p, "192.168.1.10", "192.168.1.1");
+    let web = host(&mut p, "198.51.100.10", "198.51.100.1");
+    for (a, b) in [
+        (end(fw, "GigabitEthernet1/1"), end(pc, "FastEthernet0")),
+        (end(fw, "GigabitEthernet1/2"), end(isp, "Ethernet0")),
+        (end(isp, "Ethernet1"), end(web, "FastEthernet0")),
+    ] {
+        p.connect(a, b, Medium::Copper).unwrap();
+    }
+    let port = |p: &mut Project, d: DeviceId, kind: DeviceKind, name: &str, a: &str| {
+        let mut config = p.device(d).unwrap().config.clone();
+        let iface = config.interface_mut(kind, name);
+        iface.address = Some(addr(a, 24));
+        iface.shutdown = false;
+        p.set_device_config(d, config).unwrap();
+    };
+    port(
+        &mut p,
+        fw,
+        DeviceKind::Firewall,
+        "GigabitEthernet1/1",
+        "192.168.1.1",
+    );
+    port(
+        &mut p,
+        fw,
+        DeviceKind::Firewall,
+        "GigabitEthernet1/2",
+        "203.0.113.1",
+    );
+    port(&mut p, isp, DeviceKind::Cloud, "Ethernet0", "203.0.113.2");
+    port(&mut p, isp, DeviceKind::Cloud, "Ethernet1", "198.51.100.1");
+    add_route(&mut p, fw, "0.0.0.0", 0, "203.0.113.2", 1);
+    add_route(&mut p, isp, "192.168.1.0", 24, "203.0.113.1", 1);
+    let mut net = Network::new(p);
+    // Two router hops, so the first two echoes are lost to ARP.
+    let s = net.ping(pc, ip("198.51.100.10"), 4, SimTime::ZERO).unwrap();
+    let report = net.session_report(s).unwrap();
+    assert!(report.contains("Received = 2"), "{report}");
+}
+
+#[test]
+fn span_copies_monitored_traffic_to_the_capture_port() {
+    let (mut p, sw, pc1, pc2, pc3) = office();
+    let mut config = p.device(sw).unwrap().config.clone();
+    config.monitor_sessions.insert(
+        1,
+        netrace_doc::MonitorSession {
+            sources: vec![("FastEthernet0/1".into(), netrace_doc::SpanDirection::Both)],
+            destination: Some("FastEthernet0/3".into()),
+        },
+    );
+    p.set_device_config(sw, config).unwrap();
+    let mut net = Network::new(p);
+    let s = net.ping(pc1, ip("192.168.1.11"), 2, SimTime::ZERO).unwrap();
+    assert_eq!(net.session(s).unwrap().replies.len(), 2);
+    // PC3 sits on the destination port: it captures both directions of
+    // PC1's traffic (requests and replies), and nothing is flooded to it.
+    let captured = net
+        .trace()
+        .iter()
+        .filter(|e| e.device == pc3 && e.outcome == Outcome::Accepted)
+        .filter(|e| e.summary.contains("mirrored copy"))
+        .count();
+    assert!(captured >= 4, "{captured}: {:#?}", net.trace());
+    let mirrored = net
+        .trace()
+        .iter()
+        .any(|e| e.device == sw && e.summary.contains("SPAN session 1 copies it out Fa0/3"));
+    assert!(mirrored);
+    let _ = pc2;
+}
+
+#[test]
+fn captures_export_as_pcap() {
+    let (p, _, _, [pc1, ..], _) = nat_lab();
+    let mut net = Network::new(p.clone());
+    net.ping(pc1, ip("198.51.100.10"), 2, SimTime::ZERO)
+        .unwrap();
+    // Every frame encodes to exactly its stated length.
+    for e in net.trace() {
+        if let Some(frame) = &e.frame {
+            assert_eq!(frame.to_bytes().len(), frame.len(), "{}", frame.info());
+        }
+    }
+    let link = p.links()[0].id;
+    let file = crate::pcap(net.trace(), link);
+    assert_eq!(&file[..4], &[0xd4, 0xc3, 0xb2, 0xa1]);
+    let frames = net
+        .trace()
+        .iter()
+        .filter(|e| e.link == Some(link) && e.frame.is_some())
+        .count();
+    assert!(frames > 0);
+    // Global header, then a 16-byte header and the bytes per frame.
+    let bytes: usize = net
+        .trace()
+        .iter()
+        .filter(|e| e.link == Some(link))
+        .filter_map(|e| e.frame.as_ref())
+        .map(|f| 16 + f.len())
+        .sum();
+    assert_eq!(file.len(), 24 + bytes);
+}

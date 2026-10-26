@@ -18,6 +18,9 @@ use crate::{
 
 /// Time a frame takes to cross one cable. Kept at a readable 1 ms so the
 /// event list and round-trip times are easy to follow.
+/// Seed for link conditioning's jitter and loss.
+const CONDITIONING_SEED: u64 = 0x2f6b;
+
 pub const HOP_LATENCY: Duration = Duration::from_millis(1);
 pub(crate) const PING_INTERVAL: Duration = Duration::from_secs(1);
 pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -31,6 +34,8 @@ pub enum EngineError {
     UnknownDevice(DeviceId),
     /// The device has no IP stack to send from (hubs, access points…).
     CantSend(String),
+    /// The device is switched off or suspended.
+    Powered(String),
 }
 
 impl fmt::Display for EngineError {
@@ -43,6 +48,7 @@ impl fmt::Display for EngineError {
                     "{name} can't send pings: it has no IP address of its own"
                 )
             }
+            EngineError::Powered(name) => write!(f, "{name} isn't running: start it first"),
         }
     }
 }
@@ -82,6 +88,17 @@ pub(crate) enum Event {
     ArpTimeout {
         device: DeviceId,
         ip: Ipv4Addr,
+    },
+    /// A frame link conditioning dropped: recorded where it should have arrived.
+    Lost {
+        to: DeviceId,
+        port: String,
+        frame: Frame,
+        from: DeviceId,
+        link: LinkId,
+        sent: SimTime,
+        tag: Option<u64>,
+        percent: u8,
     },
     /// An end device starts DHCP (at power-on, or `ipconfig /renew`).
     DhcpStart {
@@ -157,6 +174,10 @@ pub struct Network {
     /// Switchport settings of every switch port, read once per rebuild:
     /// the forwarding hot path asks for them per port, per frame.
     pub(crate) switchports: BTreeMap<PortKey, netrace_doc::SwitchportConfig>,
+    /// Delay, jitter, loss and bandwidth per cable, read once per rebuild.
+    pub(crate) conditioning: BTreeMap<LinkId, netrace_doc::Conditioning>,
+    /// Draws jitter and loss; reseeded each rebuild, so replays match.
+    rng: netrace_sim::Rng,
     /// Switches using anything beyond VLAN 1 (explanations mention VLANs then).
     pub(crate) vlan_switches: BTreeSet<DeviceId>,
     /// Port security: MACs learned as secure on each port.
@@ -208,6 +229,8 @@ impl Network {
             l2: Layer2::default(),
             secure: BTreeMap::new(),
             switchports: BTreeMap::new(),
+            conditioning: BTreeMap::new(),
+            rng: netrace_sim::Rng::seeded(CONDITIONING_SEED),
             vlan_switches: BTreeSet::new(),
             psec_disabled: BTreeSet::new(),
             violations: BTreeMap::new(),
@@ -313,6 +336,9 @@ impl Network {
             .project
             .device(source)
             .ok_or(EngineError::UnknownDevice(source))?;
+        if device.power != netrace_doc::Power::On {
+            return Err(EngineError::Powered(device.name.clone()));
+        }
         if !device.kind.is_host() && !device.kind.has_cli() {
             return Err(EngineError::CantSend(device.name.clone()));
         }
@@ -335,6 +361,14 @@ impl Network {
         self.trace.clear();
         self.warnings.clear();
         (self.ports, self.l2) = analyse(&self.project);
+        self.rng = netrace_sim::Rng::seeded(CONDITIONING_SEED);
+        self.conditioning = self
+            .project
+            .links()
+            .iter()
+            .filter(|l| !l.conditioning.is_default())
+            .map(|l| (l.id, l.conditioning))
+            .collect();
         self.switchports.clear();
         self.vlan_switches.clear();
         for d in self.project.devices().iter().filter(|d| d.kind.is_switch()) {
@@ -378,7 +412,11 @@ impl Network {
             .iter()
             .map(|d| {
                 let role = match d.kind {
-                    k if k.is_host() || k == DeviceKind::Router => {
+                    _ if d.power == netrace_doc::Power::Off => Role::Inert("It's switched off."),
+                    _ if d.power == netrace_doc::Power::Suspended => {
+                        Role::Inert("It's suspended: its links stay up, but it handles nothing.")
+                    }
+                    k if k.is_host() || k.is_router() => {
                         Role::Stack(build(d.id).expect("hosts and routers have stacks"))
                     }
                     k if k.is_switch() => Role::Switch {
@@ -386,13 +424,9 @@ impl Network {
                         svi: build(d.id),
                     },
                     DeviceKind::Hub => Role::Hub,
-                    DeviceKind::Firewall => Role::Inert(
-                        "Firewall rules and NAT arrive in milestone M5, so for now it drops the frame.",
+                    DeviceKind::AccessPoint => Role::Inert(
+                        "Wireless bridging comes after v1, so for now it drops the frame.",
                     ),
-                    DeviceKind::AccessPoint => {
-                        Role::Inert("Wireless bridging comes after v1, so for now it drops the frame.")
-                    }
-                    DeviceKind::Cloud => Role::Inert("The ISP connection is simulated from milestone M5."),
                     _ => Role::Inert("It has no wired connection to handle the frame."),
                 };
                 (
@@ -502,7 +536,7 @@ impl Network {
             if steps > MAX_STEPS {
                 self.warnings.push(
                     "The simulation stopped early: frames kept circulating, which usually means \
-                     switches are cabled in a loop. Spanning tree (milestone M4) will prevent this."
+                     switches are cabled in a loop with spanning tree unable to break it."
                         .into(),
                 );
                 break;
@@ -572,6 +606,40 @@ impl Network {
             Event::ProbeSend { session, seq } => self.probe_send(now, session, seq),
             Event::ProbeTimeout { session, seq } => self.probe_timeout(now, session, seq),
             Event::ArpTimeout { device, ip } => self.arp_timeout(now, device, ip),
+            Event::Lost {
+                to,
+                port,
+                frame,
+                from,
+                link,
+                sent,
+                tag,
+                percent,
+            } => {
+                let arrival = Arrival {
+                    from,
+                    link: Some(link),
+                    port,
+                    sent,
+                    tag,
+                };
+                let summary = format!(
+                    "The frame from {} never reaches {}: it's lost on the cable, which is set to lose {percent}% of \
+                     frames (link conditioning).",
+                    self.name(from),
+                    self.name(to)
+                );
+                self.record(
+                    now,
+                    to,
+                    Some(&arrival),
+                    Some(frame),
+                    Outcome::Dropped,
+                    summary,
+                    Vec::new(),
+                    Vec::new(),
+                );
+            }
             Event::DhcpStart { host } => self.dhcp_start(now, host),
             Event::TcpSyn { conn, attempt } => self.tcp_syn(now, conn, attempt),
             Event::SendBpdus => self.send_bpdus(),
@@ -887,8 +955,35 @@ impl Network {
             return false;
         };
         let sent = self.scheduler.now();
+        let mut delay = HOP_LATENCY;
+        if let Some(c) = self.conditioning.get(&link).copied() {
+            delay += Duration::from_millis(u64::from(c.latency_ms));
+            if c.jitter_ms > 0 {
+                delay += Duration::from_millis(self.rng.range(0, u64::from(c.jitter_ms) + 1));
+            }
+            if let Some(kbps) = c.bandwidth_kbps.filter(|k| *k > 0) {
+                // Serialisation: the frame's bits at the link's rate.
+                delay += Duration::from_micros(frame.len() as u64 * 8 * 1000 / u64::from(kbps));
+            }
+            if c.loss_percent > 0 && self.rng.range(0, 100) < u64::from(c.loss_percent) {
+                self.scheduler.schedule_in(
+                    delay,
+                    Event::Lost {
+                        to: peer,
+                        port: peer_port,
+                        frame,
+                        from,
+                        link,
+                        sent,
+                        tag,
+                        percent: c.loss_percent,
+                    },
+                );
+                return true;
+            }
+        }
         self.scheduler.schedule_in(
-            HOP_LATENCY,
+            delay,
             Event::Deliver {
                 to: peer,
                 port: peer_port,

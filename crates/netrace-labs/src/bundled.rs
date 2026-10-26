@@ -67,3 +67,8 @@ pub fn bundled_labs() -> Vec<BundledLab> {
         lab!("20-layer3-switch"),
     ]
 }
+
+/// The showcase network the intro tour walks through (every feature set up).
+pub fn tour_json() -> &'static [u8] {
+    include_bytes!("../../../examples/tour.netrace/project.json")
+}

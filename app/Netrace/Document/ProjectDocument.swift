@@ -19,16 +19,30 @@ final class ProjectDocument: ReferenceFileDocument, @unchecked Sendable {
 
     /// Latest snapshot of the core model. Views render from this only.
     @MainActor @Published private(set) var state: ProjectSnapshot
+    /// Saved states of the topology, newest last.
+    @MainActor @Published private(set) var snapshots: [SnapshotInfo] = []
 
     init() {
         project = Project()
         _state = Published(initialValue: project.snapshot())
+        _snapshots = Published(initialValue: project.snapshots())
+    }
+
+    /// Opened from Help → Take the Tour: the window starts the tour.
+    var startsTour = false
+
+    /// The intro tour's showcase network, as a new untitled document.
+    static func tour() -> ProjectDocument? {
+        let document = try? ProjectDocument(json: Data(tourProjectJson()))
+        document?.startsTour = true
+        return document
     }
 
     /// A new, untitled document holding a copy of a bundled lab.
     init(json: Data) throws {
         project = try Project.fromJson(data: json)
         _state = Published(initialValue: project.snapshot())
+        _snapshots = Published(initialValue: project.snapshots())
     }
 
     required init(configuration: ReadConfiguration) throws {
@@ -41,6 +55,7 @@ final class ProjectDocument: ReferenceFileDocument, @unchecked Sendable {
             throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedFailureReasonErrorKey: error.message])
         }
         _state = Published(initialValue: project.snapshot())
+        _snapshots = Published(initialValue: project.snapshots())
     }
 
     func snapshot(contentType: UTType) throws -> Data {
@@ -557,6 +572,117 @@ extension ProjectDocument {
 
     private func refresh() {
         state = project.snapshot()
+        snapshots = project.snapshots()
+    }
+
+    // MARK: Server DHCP
+
+    func serverDHCP(_ id: UInt64) -> ServerDhcp? {
+        project.serverDhcp(id: id)
+    }
+
+    func setServerDHCP(_ id: UInt64, _ service: ServerDhcp?, undoManager: UndoManager?) -> Result<Void, CoreError> {
+        do {
+            let previous = try project.setServerDhcp(id: id, service: service)
+            refresh()
+            registerUndo(undoManager, name: "Change DHCP Service") { doc, undo in
+                _ = doc.setServerDHCP(id, previous, undoManager: undo)
+            }
+            return .success(())
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
+    // MARK: Link conditioning
+
+    func setLinkConditioning(_ id: UInt64, _ conditioning: LinkConditioning, undoManager: UndoManager?) {
+        guard let previous = try? project.setLinkConditioning(id: id, conditioning: conditioning),
+              previous != conditioning else { return }
+        refresh()
+        registerUndo(undoManager, name: "Change Conditioning") { doc, undo in
+            doc.setLinkConditioning(id, previous, undoManager: undo)
+        }
+    }
+
+    // MARK: Power
+
+    /// Starts, suspends or stops devices (one undo step).
+    func setPower(_ power: DevicePower, for ids: [UInt64], undoManager: UndoManager?) {
+        var previous: [(UInt64, DevicePower)] = []
+        for id in ids {
+            if let old = try? project.setPower(id: id, power: power), old != power { previous.append((id, old)) }
+        }
+        guard !previous.isEmpty else { return }
+        refresh()
+        let name = switch power {
+        case .on: "Start"
+        case .suspended: "Suspend"
+        case .off: "Stop"
+        }
+        registerUndo(undoManager, name: name) { doc, undo in
+            for (id, old) in previous { doc.setPower(old, for: [id], undoManager: undo) }
+        }
+    }
+
+    /// IOS `reload` on routers and switches: the running configuration
+    /// becomes the saved startup one. Undoable.
+    func reload(_ ids: [UInt64], undoManager: UndoManager?) {
+        for id in ids where device(id)?.kind.hasCli == true {
+            guard let before = settings(of: id), (try? project.reloadDevice(id: id)) != nil else { continue }
+            refresh()
+            registerUndo(undoManager, name: "Reload") { doc, undo in
+                doc.applySettings(id, before, actionName: "Reload", undoManager: undo)
+            }
+        }
+        setPower(.on, for: ids, undoManager: undoManager)
+    }
+
+    // MARK: Snapshots
+
+    func takeSnapshot(named name: String, undoManager: UndoManager?) {
+        let index = project.takeSnapshot(name: name, taken: UInt64(Date().timeIntervalSince1970))
+        refresh()
+        registerUndo(undoManager, name: "Take Snapshot") { doc, undo in
+            doc.deleteSnapshot(Int(index), undoManager: undo)
+        }
+    }
+
+    func restoreSnapshot(_ index: Int, undoManager: UndoManager?) -> Result<Void, CoreError> {
+        do {
+            let replaced = try project.restoreSnapshot(index: UInt32(index))
+            refresh()
+            registerUndo(undoManager, name: "Restore Snapshot") { doc, undo in
+                doc.putBack(replaced, undoManager: undo, redo: index)
+            }
+            return .success(())
+        } catch let error as CoreError {
+            return .failure(error)
+        } catch {
+            return .failure(.InvalidOperation(message: error.localizedDescription))
+        }
+    }
+
+    private func putBack(_ state: SavedState, undoManager: UndoManager?, redo index: Int) {
+        try? project.setState(state: state)
+        refresh()
+        registerUndo(undoManager, name: "Restore Snapshot") { doc, undo in
+            _ = doc.restoreSnapshot(index, undoManager: undo)
+        }
+    }
+
+    func deleteSnapshot(_ index: Int, undoManager: UndoManager?) {
+        guard let removed = try? project.deleteSnapshot(index: UInt32(index)) else { return }
+        refresh()
+        registerUndo(undoManager, name: "Delete Snapshot") { doc, undo in
+            doc.project.insertSnapshot(index: UInt32(index), snapshot: removed)
+            doc.refresh()
+            doc.registerUndo(undo, name: "Delete Snapshot") { doc, undo in
+                doc.deleteSnapshot(index, undoManager: undo)
+            }
+        }
     }
 
     private func registerUndo(

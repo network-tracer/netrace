@@ -28,6 +28,9 @@ pub enum DocError {
     #[error("device {0} does not exist")]
     UnknownDevice(DeviceId),
 
+    #[error("snapshot {0} does not exist")]
+    UnknownSnapshot(usize),
+
     #[error("{0} is locked by the lab: you can look at it, but not change it")]
     Locked(String),
 

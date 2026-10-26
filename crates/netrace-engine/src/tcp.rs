@@ -110,6 +110,9 @@ impl Network {
             .project
             .device(source)
             .ok_or(crate::EngineError::UnknownDevice(source))?;
+        if device.power != netrace_doc::Power::On {
+            return Err(crate::EngineError::Powered(device.name.clone()));
+        }
         if !device.kind.is_host() {
             return Err(crate::EngineError::CantSend(device.name.clone()));
         }

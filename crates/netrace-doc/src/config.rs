@@ -10,8 +10,8 @@ use std::net::Ipv4Addr;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccessList, DeviceKind, DhcpPool, DocError, NatPool, NatRule, NatSide, OspfInterface,
-    OspfProcess, StpConfig, SwitchportConfig, VlanConfig,
+    AccessList, DeviceKind, DhcpPool, DocError, MonitorSession, NatPool, NatRule, NatSide,
+    OspfInterface, OspfProcess, StpConfig, SwitchportConfig, VlanConfig,
 };
 
 /// An address and prefix configured on an interface (`ip address A M`).
@@ -178,6 +178,9 @@ pub struct DeviceConfig {
     /// `router ospf N` processes.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ospf: Vec<OspfProcess>,
+    /// `monitor session N ...` (SPAN) on a switch.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub monitor_sessions: BTreeMap<u16, MonitorSession>,
 }
 
 fn is_true(value: &bool) -> bool {
@@ -207,6 +210,7 @@ impl Default for DeviceConfig {
             nat_pools: Vec::new(),
             nat_rules: Vec::new(),
             ospf: Vec::new(),
+            monitor_sessions: BTreeMap::new(),
         }
     }
 }
@@ -239,6 +243,13 @@ impl DeviceConfig {
         self.dhcp_excluded
             .iter()
             .any(|(a, b)| (u32::from(*a)..=u32::from(*b)).contains(&u32::from(ip)))
+    }
+
+    /// Whether `port` is a SPAN destination: it sends only mirrored copies.
+    pub fn span_destination(&self, port: &str) -> bool {
+        self.monitor_sessions
+            .values()
+            .any(|m| m.destination.as_deref() == Some(port))
     }
 
     pub fn vlan_exists(&self, id: u16) -> bool {
@@ -328,7 +339,21 @@ impl DeviceKind {
     pub fn has_cli(self) -> bool {
         matches!(
             self,
-            DeviceKind::Router | DeviceKind::L2Switch | DeviceKind::L3Switch
+            DeviceKind::Router
+                | DeviceKind::Firewall
+                | DeviceKind::Cloud
+                | DeviceKind::L2Switch
+                | DeviceKind::L3Switch
+        )
+    }
+
+    /// Devices that run as IOS routers: routers, and the firewall and the
+    /// internet cloud, which are routers with their own ports (the firewall
+    /// filters with ACLs and translates with NAT, as an IOS router does).
+    pub fn is_router(self) -> bool {
+        matches!(
+            self,
+            DeviceKind::Router | DeviceKind::Firewall | DeviceKind::Cloud
         )
     }
 
@@ -349,7 +374,7 @@ impl DeviceKind {
                 .filter(|n| n.to_string() == name[prefix.len()..])
         };
         match self {
-            DeviceKind::Router => {
+            k if k.is_router() => {
                 number("Loopback").is_some()
                     || name.split_once('.').is_some_and(|(port, sub)| {
                         self.has_port(port)
@@ -370,7 +395,7 @@ impl DeviceKind {
         if name.starts_with("Vlan") {
             return true;
         }
-        self == DeviceKind::Router && self.has_port(name)
+        self.is_router() && self.has_port(name)
     }
 }
 

@@ -272,8 +272,8 @@ impl Ospf {
 
         // Router IDs and OSPF interfaces.
         for d in project.devices() {
-            let routing = d.kind == DeviceKind::Router
-                || (d.kind == DeviceKind::L3Switch && d.config.ip_routing);
+            let routing =
+                d.kind.is_router() || (d.kind == DeviceKind::L3Switch && d.config.ip_routing);
             let (Some(process), true) = (d.config.ospf.first(), routing) else {
                 continue;
             };

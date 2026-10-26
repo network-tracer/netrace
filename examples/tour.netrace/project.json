@@ -1,0 +1,1286 @@
+{
+  "format": "netrace",
+  "version": 2,
+  "next_id": 50,
+  "devices": [
+    {
+      "id": 1,
+      "kind": "cloud",
+      "name": "ISP",
+      "position": {
+        "x": 735.0,
+        "y": 115.0
+      },
+      "config": {
+        "interfaces": {
+          "Ethernet0": {
+            "shutdown": false,
+            "address": {
+              "address": "203.0.113.2",
+              "prefix_len": 30
+            }
+          },
+          "Ethernet1": {
+            "shutdown": false,
+            "address": {
+              "address": "198.51.100.1",
+              "prefix_len": 24
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "kind": "server",
+      "name": "THREAT-INTEL",
+      "position": {
+        "x": 865.0,
+        "y": 115.0
+      },
+      "ip": {
+        "address": "198.51.100.10",
+        "prefix_len": 24,
+        "gateway": "198.51.100.1"
+      }
+    },
+    {
+      "id": 3,
+      "kind": "firewall",
+      "name": "FW",
+      "position": {
+        "x": 800.0,
+        "y": 245.0
+      },
+      "config": {
+        "interfaces": {
+          "GigabitEthernet1/1": {
+            "shutdown": false,
+            "address": {
+              "address": "203.0.113.1",
+              "prefix_len": 30
+            },
+            "nat": "outside",
+            "description": "ISP"
+          },
+          "GigabitEthernet1/2": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.0.1",
+              "prefix_len": 30
+            },
+            "nat": "inside",
+            "description": "CORE"
+          }
+        },
+        "routes": [
+          {
+            "network": "0.0.0.0",
+            "prefix_len": 0,
+            "target": {
+              "next_hop": "203.0.113.2"
+            },
+            "distance": 1
+          }
+        ],
+        "ospf": [
+          {
+            "process_id": 1,
+            "router_id": "1.1.1.1",
+            "default_originate": true,
+            "networks": [
+              {
+                "address": "10.0.0.0",
+                "wildcard": "0.255.255.255",
+                "area": 0
+              }
+            ]
+          }
+        ],
+        "access_lists": [
+          {
+            "name": "1",
+            "kind": "standard",
+            "remarks": [
+              "Agency networks allowed out"
+            ],
+            "entries": [
+              {
+                "sequence": 10,
+                "action": "permit",
+                "protocol": "ip",
+                "source": {
+                  "address": "10.0.0.0",
+                  "wildcard": "0.255.255.255"
+                },
+                "destination": {
+                  "address": "0.0.0.0",
+                  "wildcard": "255.255.255.255"
+                }
+              }
+            ]
+          }
+        ],
+        "nat_rules": [
+          {
+            "dynamic": {
+              "acl": "1",
+              "target": {
+                "interface": "GigabitEthernet1/1"
+              },
+              "overload": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "kind": "l3_switch",
+      "name": "CORE",
+      "position": {
+        "x": 800.0,
+        "y": 420.0
+      },
+      "config": {
+        "ip_routing": true,
+        "vlans": {
+          "10": {
+            "name": "CYBERSECURITY"
+          },
+          "20": {
+            "name": "COUNTER-TERROR"
+          },
+          "30": {
+            "name": "INTERNAL-AFFAIRS"
+          },
+          "40": {
+            "name": "FIELD-OPS"
+          },
+          "50": {
+            "name": "DATA-CENTER"
+          },
+          "99": {
+            "name": "WATCHERS"
+          }
+        },
+        "interfaces": {
+          "GigabitEthernet1/0/24": {
+            "shutdown": false,
+            "address": {
+              "address": "10.0.0.2",
+              "prefix_len": 30
+            },
+            "switchport": {
+              "routed": true
+            },
+            "description": "FW"
+          },
+          "GigabitEthernet1/0/20": {
+            "shutdown": false,
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 99
+            },
+            "description": "WATCHERS (SPAN)"
+          },
+          "GigabitEthernet1/0/1": {
+            "switchport": {
+              "mode": "trunk"
+            },
+            "shutdown": false,
+            "description": "SW-CYBER"
+          },
+          "Vlan10": {
+            "shutdown": false,
+            "address": {
+              "address": "10.10.10.1",
+              "prefix_len": 24
+            },
+            "description": "CYBERSECURITY"
+          },
+          "GigabitEthernet1/0/2": {
+            "switchport": {
+              "mode": "trunk"
+            },
+            "shutdown": false,
+            "description": "SW-CT"
+          },
+          "Vlan20": {
+            "shutdown": false,
+            "address": {
+              "address": "10.20.20.1",
+              "prefix_len": 24
+            },
+            "description": "COUNTER-TERROR"
+          },
+          "GigabitEthernet1/0/3": {
+            "switchport": {
+              "mode": "trunk"
+            },
+            "shutdown": false,
+            "description": "SW-IA"
+          },
+          "Vlan30": {
+            "shutdown": false,
+            "address": {
+              "address": "10.30.30.1",
+              "prefix_len": 24
+            },
+            "description": "INTERNAL-AFFAIRS"
+          },
+          "GigabitEthernet1/0/4": {
+            "switchport": {
+              "mode": "trunk"
+            },
+            "shutdown": false,
+            "description": "SW-FIELD"
+          },
+          "Vlan40": {
+            "shutdown": false,
+            "address": {
+              "address": "10.40.40.1",
+              "prefix_len": 24
+            },
+            "description": "FIELD-OPS",
+            "acl_in": "140"
+          },
+          "GigabitEthernet1/0/5": {
+            "switchport": {
+              "mode": "trunk"
+            },
+            "shutdown": false,
+            "description": "SW-DATA"
+          },
+          "Vlan50": {
+            "shutdown": false,
+            "address": {
+              "address": "10.50.50.1",
+              "prefix_len": 24
+            },
+            "description": "DATA-CENTER"
+          }
+        },
+        "spanning_tree": {
+          "mode": "rapid_pvst",
+          "priorities": {
+            "1": 4096,
+            "10": 4096,
+            "20": 4096,
+            "30": 4096,
+            "40": 4096,
+            "50": 4096,
+            "99": 4096
+          }
+        },
+        "dhcp_pools": [
+          {
+            "name": "CYBERSECURITY",
+            "network": [
+              "10.10.10.0",
+              24
+            ],
+            "default_router": "10.10.10.1",
+            "dns_server": "10.50.50.10",
+            "domain_name": "shadow.net"
+          },
+          {
+            "name": "COUNTER-TERROR",
+            "network": [
+              "10.20.20.0",
+              24
+            ],
+            "default_router": "10.20.20.1",
+            "dns_server": "10.50.50.10",
+            "domain_name": "shadow.net"
+          },
+          {
+            "name": "INTERNAL-AFFAIRS",
+            "network": [
+              "10.30.30.0",
+              24
+            ],
+            "default_router": "10.30.30.1",
+            "dns_server": "10.50.50.10",
+            "domain_name": "shadow.net"
+          },
+          {
+            "name": "FIELD-OPS",
+            "network": [
+              "10.40.40.0",
+              24
+            ],
+            "default_router": "10.40.40.1",
+            "dns_server": "10.50.50.10",
+            "domain_name": "shadow.net"
+          }
+        ],
+        "dhcp_excluded": [
+          [
+            "10.10.10.1",
+            "10.10.10.49"
+          ],
+          [
+            "10.20.20.1",
+            "10.20.20.49"
+          ],
+          [
+            "10.30.30.1",
+            "10.30.30.49"
+          ],
+          [
+            "10.40.40.1",
+            "10.40.40.49"
+          ]
+        ],
+        "access_lists": [
+          {
+            "name": "140",
+            "kind": "extended",
+            "remarks": [
+              "Field Ops may not open personnel records"
+            ],
+            "entries": [
+              {
+                "sequence": 10,
+                "action": "deny",
+                "protocol": "ip",
+                "source": {
+                  "address": "10.40.40.0",
+                  "wildcard": "0.0.0.255"
+                },
+                "destination": {
+                  "address": "10.30.30.20",
+                  "wildcard": "0.0.0.0"
+                }
+              },
+              {
+                "sequence": 20,
+                "action": "permit",
+                "protocol": "ip",
+                "source": {
+                  "address": "0.0.0.0",
+                  "wildcard": "255.255.255.255"
+                },
+                "destination": {
+                  "address": "0.0.0.0",
+                  "wildcard": "255.255.255.255"
+                }
+              }
+            ]
+          }
+        ],
+        "ospf": [
+          {
+            "process_id": 1,
+            "router_id": "2.2.2.2",
+            "networks": [
+              {
+                "address": "10.0.0.0",
+                "wildcard": "0.255.255.255",
+                "area": 0
+              }
+            ],
+            "passive": [
+              "Vlan10",
+              "Vlan20",
+              "Vlan30",
+              "Vlan40",
+              "Vlan50"
+            ]
+          }
+        ],
+        "monitor_sessions": {
+          "1": {
+            "sources": [
+              [
+                "GigabitEthernet1/0/3",
+                "both"
+              ]
+            ],
+            "destination": "GigabitEthernet1/0/20"
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "kind": "pc",
+      "name": "WATCHER",
+      "position": {
+        "x": 150.0,
+        "y": 440.0
+      },
+      "ip": {
+        "address": "10.99.99.10",
+        "prefix_len": 24,
+        "gateway": "10.99.99.1"
+      }
+    },
+    {
+      "id": 10,
+      "kind": "l2_switch",
+      "name": "SW-CYBER",
+      "position": {
+        "x": 460.0,
+        "y": 215.0
+      },
+      "config": {
+        "vlans": {
+          "10": {
+            "name": "CYBERSECURITY"
+          },
+          "20": {
+            "name": "COUNTER-TERROR"
+          },
+          "30": {
+            "name": "INTERNAL-AFFAIRS"
+          },
+          "40": {
+            "name": "FIELD-OPS"
+          },
+          "50": {
+            "name": "DATA-CENTER"
+          },
+          "99": {
+            "name": "WATCHERS"
+          }
+        },
+        "interfaces": {
+          "GigabitEthernet0/1": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "GigabitEthernet0/2": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "FastEthernet0/1": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 10,
+              "portfast": true,
+              "port_security": {
+                "enabled": true,
+                "maximum": 1,
+                "sticky": true,
+                "violation": "restrict"
+              }
+            }
+          },
+          "FastEthernet0/2": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 10,
+              "portfast": true,
+              "port_security": {
+                "enabled": true,
+                "maximum": 1,
+                "sticky": true,
+                "violation": "restrict"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "kind": "pc",
+      "name": "IDS-IPS",
+      "position": {
+        "x": 385.0,
+        "y": 320.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 14,
+      "kind": "pc",
+      "name": "SOC-1",
+      "position": {
+        "x": 535.0,
+        "y": 320.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 16,
+      "kind": "l2_switch",
+      "name": "SW-CT",
+      "position": {
+        "x": 1140.0,
+        "y": 215.0
+      },
+      "config": {
+        "vlans": {
+          "10": {
+            "name": "CYBERSECURITY"
+          },
+          "20": {
+            "name": "COUNTER-TERROR"
+          },
+          "30": {
+            "name": "INTERNAL-AFFAIRS"
+          },
+          "40": {
+            "name": "FIELD-OPS"
+          },
+          "50": {
+            "name": "DATA-CENTER"
+          },
+          "99": {
+            "name": "WATCHERS"
+          }
+        },
+        "interfaces": {
+          "GigabitEthernet0/1": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "GigabitEthernet0/2": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "FastEthernet0/1": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 20,
+              "portfast": true,
+              "port_security": {
+                "enabled": true,
+                "maximum": 1,
+                "sticky": true,
+                "violation": "restrict"
+              }
+            }
+          },
+          "FastEthernet0/2": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 20,
+              "portfast": true,
+              "port_security": {
+                "enabled": true,
+                "maximum": 1,
+                "sticky": true,
+                "violation": "restrict"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 18,
+      "kind": "pc",
+      "name": "THREAT-MON",
+      "position": {
+        "x": 1065.0,
+        "y": 320.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 20,
+      "kind": "laptop",
+      "name": "SECURE-LINK",
+      "position": {
+        "x": 1215.0,
+        "y": 320.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 22,
+      "kind": "l2_switch",
+      "name": "SW-IA",
+      "position": {
+        "x": 460.0,
+        "y": 565.0
+      },
+      "config": {
+        "vlans": {
+          "10": {
+            "name": "CYBERSECURITY"
+          },
+          "20": {
+            "name": "COUNTER-TERROR"
+          },
+          "30": {
+            "name": "INTERNAL-AFFAIRS"
+          },
+          "40": {
+            "name": "FIELD-OPS"
+          },
+          "50": {
+            "name": "DATA-CENTER"
+          },
+          "99": {
+            "name": "WATCHERS"
+          }
+        },
+        "interfaces": {
+          "GigabitEthernet0/1": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "GigabitEthernet0/2": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "FastEthernet0/1": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 30,
+              "portfast": true,
+              "port_security": {
+                "enabled": true,
+                "maximum": 1,
+                "sticky": true,
+                "violation": "restrict"
+              }
+            }
+          },
+          "FastEthernet0/2": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 30,
+              "portfast": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 24,
+      "kind": "pc",
+      "name": "AUDITOR",
+      "position": {
+        "x": 385.0,
+        "y": 670.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 26,
+      "kind": "server",
+      "name": "PERSONNEL",
+      "position": {
+        "x": 535.0,
+        "y": 670.0
+      },
+      "ip": {
+        "address": "10.30.30.20",
+        "prefix_len": 24,
+        "gateway": "10.30.30.1"
+      }
+    },
+    {
+      "id": 28,
+      "kind": "l2_switch",
+      "name": "SW-FIELD",
+      "position": {
+        "x": 1140.0,
+        "y": 565.0
+      },
+      "config": {
+        "vlans": {
+          "10": {
+            "name": "CYBERSECURITY"
+          },
+          "20": {
+            "name": "COUNTER-TERROR"
+          },
+          "30": {
+            "name": "INTERNAL-AFFAIRS"
+          },
+          "40": {
+            "name": "FIELD-OPS"
+          },
+          "50": {
+            "name": "DATA-CENTER"
+          },
+          "99": {
+            "name": "WATCHERS"
+          }
+        },
+        "interfaces": {
+          "GigabitEthernet0/1": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "GigabitEthernet0/2": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "FastEthernet0/1": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 40,
+              "portfast": true,
+              "port_security": {
+                "enabled": true,
+                "maximum": 1,
+                "sticky": true,
+                "violation": "restrict"
+              }
+            }
+          },
+          "FastEthernet0/2": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 40,
+              "portfast": true,
+              "port_security": {
+                "enabled": true,
+                "maximum": 1,
+                "sticky": true,
+                "violation": "restrict"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 30,
+      "kind": "laptop",
+      "name": "TAC-TEAM",
+      "position": {
+        "x": 1065.0,
+        "y": 670.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 32,
+      "kind": "pc",
+      "name": "GPS-TRACK",
+      "position": {
+        "x": 1215.0,
+        "y": 670.0
+      },
+      "dhcp": true
+    },
+    {
+      "id": 35,
+      "kind": "l2_switch",
+      "name": "SW-DATA",
+      "position": {
+        "x": 800.0,
+        "y": 755.0
+      },
+      "config": {
+        "vlans": {
+          "10": {
+            "name": "CYBERSECURITY"
+          },
+          "20": {
+            "name": "COUNTER-TERROR"
+          },
+          "30": {
+            "name": "INTERNAL-AFFAIRS"
+          },
+          "40": {
+            "name": "FIELD-OPS"
+          },
+          "50": {
+            "name": "DATA-CENTER"
+          },
+          "99": {
+            "name": "WATCHERS"
+          }
+        },
+        "interfaces": {
+          "GigabitEthernet0/1": {
+            "switchport": {
+              "mode": "trunk"
+            }
+          },
+          "FastEthernet0/1": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 50,
+              "portfast": true
+            }
+          },
+          "FastEthernet0/2": {
+            "switchport": {
+              "mode": "access",
+              "access_vlan": 50,
+              "portfast": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 36,
+      "kind": "server",
+      "name": "VAULT",
+      "position": {
+        "x": 725.0,
+        "y": 860.0
+      },
+      "ip": {
+        "address": "10.50.50.10",
+        "prefix_len": 24,
+        "gateway": "10.50.50.1"
+      }
+    },
+    {
+      "id": 37,
+      "kind": "server",
+      "name": "APPS",
+      "position": {
+        "x": 875.0,
+        "y": 860.0
+      },
+      "ip": {
+        "address": "10.50.50.20",
+        "prefix_len": 24,
+        "gateway": "10.50.50.1"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 6,
+      "a": {
+        "device": 1,
+        "port": "Ethernet0"
+      },
+      "b": {
+        "device": 3,
+        "port": "GigabitEthernet1/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 7,
+      "a": {
+        "device": 1,
+        "port": "Ethernet1"
+      },
+      "b": {
+        "device": 2,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 8,
+      "a": {
+        "device": 3,
+        "port": "GigabitEthernet1/2"
+      },
+      "b": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/24"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 9,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/20"
+      },
+      "b": {
+        "device": 5,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 11,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/1"
+      },
+      "b": {
+        "device": 10,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 13,
+      "a": {
+        "device": 10,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 12,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 15,
+      "a": {
+        "device": 10,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 14,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 17,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/2"
+      },
+      "b": {
+        "device": 16,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 19,
+      "a": {
+        "device": 16,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 18,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 21,
+      "a": {
+        "device": 16,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 20,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 23,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/3"
+      },
+      "b": {
+        "device": 22,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 25,
+      "a": {
+        "device": 22,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 24,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 27,
+      "a": {
+        "device": 22,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 26,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 29,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/4"
+      },
+      "b": {
+        "device": 28,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 31,
+      "a": {
+        "device": 28,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 30,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 33,
+      "a": {
+        "device": 28,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 32,
+        "port": "FastEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 34,
+      "a": {
+        "device": 22,
+        "port": "GigabitEthernet0/2"
+      },
+      "b": {
+        "device": 28,
+        "port": "GigabitEthernet0/2"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 38,
+      "a": {
+        "device": 4,
+        "port": "GigabitEthernet1/0/5"
+      },
+      "b": {
+        "device": 35,
+        "port": "GigabitEthernet0/1"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 39,
+      "a": {
+        "device": 35,
+        "port": "FastEthernet0/1"
+      },
+      "b": {
+        "device": 36,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    },
+    {
+      "id": 40,
+      "a": {
+        "device": 35,
+        "port": "FastEthernet0/2"
+      },
+      "b": {
+        "device": 37,
+        "port": "GigabitEthernet0"
+      },
+      "medium": "copper"
+    }
+  ],
+  "annotations": [
+    {
+      "id": 41,
+      "kind": "area",
+      "rect": {
+        "x": 635.0,
+        "y": 30.0,
+        "width": 330,
+        "height": 270
+      },
+      "text": "EDGE  \u00b7  FIREWALL",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 6
+        },
+        "stroke": "gray",
+        "fill": "gray",
+        "fill_opacity": 0.16,
+        "line": "solid",
+        "label": "gray"
+      }
+    },
+    {
+      "id": 42,
+      "kind": "area",
+      "rect": {
+        "x": 685.0,
+        "y": 325.0,
+        "width": 230,
+        "height": 200
+      },
+      "text": "CORE",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 8
+        },
+        "stroke": "teal",
+        "fill": "teal",
+        "fill_opacity": 0.16,
+        "line": "solid",
+        "label": "teal"
+      }
+    },
+    {
+      "id": 43,
+      "kind": "area",
+      "rect": {
+        "x": 295.0,
+        "y": 125.0,
+        "width": 330,
+        "height": 290
+      },
+      "text": "VLAN 10  \u00b7  CYBERSECURITY",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 6
+        },
+        "stroke": "blue",
+        "fill": "blue",
+        "fill_opacity": 0.16,
+        "line": "solid",
+        "label": "blue"
+      }
+    },
+    {
+      "id": 44,
+      "kind": "area",
+      "rect": {
+        "x": 975.0,
+        "y": 125.0,
+        "width": 330,
+        "height": 290
+      },
+      "text": "VLAN 20  \u00b7  COUNTER-TERROR",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 6
+        },
+        "stroke": "red",
+        "fill": "red",
+        "fill_opacity": 0.16,
+        "line": "solid",
+        "label": "red"
+      }
+    },
+    {
+      "id": 45,
+      "kind": "area",
+      "rect": {
+        "x": 295.0,
+        "y": 475.0,
+        "width": 330,
+        "height": 290
+      },
+      "text": "VLAN 30  \u00b7  INTERNAL-AFFAIRS",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 6
+        },
+        "stroke": "yellow",
+        "fill": "yellow",
+        "fill_opacity": 0.16,
+        "line": "solid",
+        "label": "yellow"
+      }
+    },
+    {
+      "id": 46,
+      "kind": "area",
+      "rect": {
+        "x": 975.0,
+        "y": 475.0,
+        "width": 330,
+        "height": 290
+      },
+      "text": "VLAN 40  \u00b7  FIELD-OPS",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 6
+        },
+        "stroke": "green",
+        "fill": "green",
+        "fill_opacity": 0.16,
+        "line": "solid",
+        "label": "green"
+      }
+    },
+    {
+      "id": 47,
+      "kind": "area",
+      "rect": {
+        "x": 620.0,
+        "y": 675.0,
+        "width": 360,
+        "height": 260
+      },
+      "text": "VLAN 50  \u00b7  DATA-CENTER",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 6
+        },
+        "stroke": "orange",
+        "fill": "orange",
+        "fill_opacity": 0.16,
+        "line": "solid",
+        "label": "orange"
+      }
+    },
+    {
+      "id": 48,
+      "kind": "area",
+      "rect": {
+        "x": 40.0,
+        "y": 340.0,
+        "width": 220,
+        "height": 200
+      },
+      "text": "VLAN 99  \u00b7  WATCHERS",
+      "style": {
+        "shape": {
+          "kind": "polygon",
+          "sides": 5
+        },
+        "stroke": "purple",
+        "fill": "purple",
+        "fill_opacity": 0.16,
+        "line": "dashed",
+        "label": "purple"
+      }
+    },
+    {
+      "id": 49,
+      "kind": "note",
+      "rect": {
+        "x": 20.0,
+        "y": 30.0,
+        "width": 320.0,
+        "height": 150.0
+      },
+      "text": "THE SHADOW NETWORK\nA multi-agency VLAN operation with everything netrace simulates: VLANs and trunks, rapid spanning tree, inter-VLAN routing on the core, DHCP, port security, an access list, OSPF, PAT through the firewall, TCP, and a SPAN session the Watchers listen on. Help > Take the Tour walks you through the app on it."
+    }
+  ]
+}

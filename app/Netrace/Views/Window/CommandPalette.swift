@@ -120,7 +120,7 @@ struct CommandPalette: View {
     private var commands: [Command] {
         let ws = workspace
         let ids = document.state.devices.map(\.id)
-        var list: [Command] = DeviceKind.allCases.map { kind in
+        var list: [Command] = DeviceKind.allCases.filter(\.inLibrary).map { kind in
             Command(id: "add.\(kind)", title: "Add \(kind.displayName)", group: "Devices",
                     glyph: kind.category == .network ? .custom(.topology) : .system("desktopcomputer")) {
                 let point = Placement.freeSpot(near: ws.viewportCenter, avoiding: document.state.devices.map(\.position))

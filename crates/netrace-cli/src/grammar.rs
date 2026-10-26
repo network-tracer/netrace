@@ -54,10 +54,10 @@ impl Devices {
     fn allows(self, kind: DeviceKind) -> bool {
         match self {
             Devices::Any => true,
-            Devices::Router => kind == DeviceKind::Router,
+            Devices::Router => kind.is_router(),
             Devices::Switch => kind.is_switch(),
             Devices::L3Switch => kind == DeviceKind::L3Switch,
-            Devices::Routing => kind == DeviceKind::Router || kind == DeviceKind::L3Switch,
+            Devices::Routing => kind.is_router() || kind == DeviceKind::L3Switch,
         }
     }
 }
@@ -190,6 +190,7 @@ pub(crate) const COMMANDS: &[Command] = &[
         &["Interface name"]
     ),
     cmd!("show-stp", "show spanning-tree", EXEC, Devices::Switch),
+    cmd!("show-monitor", "show monitor", EXEC, Devices::Switch),
     cmd!(
         "show-stp-vlan",
         "show spanning-tree vlan <1-4094>",
@@ -1112,6 +1113,49 @@ pub(crate) const COMMANDS: &[Command] = &[
         Devices::Router,
         &["Access list number or name"]
     ),
+    // SPAN
+    cmd!(
+        "span-source",
+        "monitor session <1-66> source interface IFACE",
+        CONFIG,
+        Devices::Switch,
+        &["SPAN session number", "SPAN source interface"]
+    ),
+    cmd!(
+        "span-source-both",
+        "monitor session <1-66> source interface IFACE both",
+        CONFIG,
+        Devices::Switch,
+        &["SPAN session number", "SPAN source interface"]
+    ),
+    cmd!(
+        "span-source-rx",
+        "monitor session <1-66> source interface IFACE rx",
+        CONFIG,
+        Devices::Switch,
+        &["SPAN session number", "SPAN source interface"]
+    ),
+    cmd!(
+        "span-source-tx",
+        "monitor session <1-66> source interface IFACE tx",
+        CONFIG,
+        Devices::Switch,
+        &["SPAN session number", "SPAN source interface"]
+    ),
+    cmd!(
+        "span-destination",
+        "monitor session <1-66> destination interface IFACE",
+        CONFIG,
+        Devices::Switch,
+        &["SPAN session number", "SPAN destination interface"]
+    ),
+    cmd!(
+        "no-span",
+        "no monitor session <1-66>",
+        CONFIG,
+        Devices::Switch,
+        &["SPAN session number"]
+    ),
     cmd!("cdp-run", "cdp run", CONFIG),
     cmd!("no-cdp-run", "no cdp run", CONFIG),
     cmd!("lldp-run", "lldp run", CONFIG),
@@ -1234,6 +1278,12 @@ pub(crate) fn keyword_help(keyword: &str, ctx: Ctx) -> &'static str {
         "primary" => "Configure this switch as primary root for this spanning tree",
         "secondary" => "Configure switch as secondary root",
         "cdp" => "CDP information / Global CDP configuration subcommands",
+        "monitor" => "SPAN information and configuration / Monitoring different system events",
+        "session" => "Configure a SPAN session",
+        "destination" => "SPAN destination interface or VLAN",
+        "both" => "Monitor received and transmitted traffic",
+        "rx" => "Monitor received traffic only",
+        "tx" => "Monitor transmitted traffic only",
         "neighbors" => "CDP neighbor entries",
         "detail" => "Show detailed information",
         "run" => "Enable the protocol",
@@ -1279,7 +1329,7 @@ pub(crate) fn keyword_help(keyword: &str, ctx: Ctx) -> &'static str {
         "protocols" => "IP routing protocol process parameters and statistics",
         "inside" => "Inside address translation / Inside interface for address translation",
         "outside" => "Outside interface for address translation",
-        "source" => "Source address translation",
+        "source" => "Source address translation / SPAN source interface",
         "static" => "Specify static local->global mapping",
         "list" => "Specify access list describing local addresses",
         "overload" => "Overload an address translation",

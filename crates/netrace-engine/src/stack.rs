@@ -23,11 +23,21 @@ pub(crate) struct PortStates {
     pub up: BTreeSet<(DeviceId, String)>,
     /// Ports with a cable plugged in.
     pub cabled: BTreeSet<(DeviceId, String)>,
+    /// Devices that are switched off: their links are down.
+    pub off: BTreeSet<DeviceId>,
 }
 
 impl PortStates {
     pub fn of(project: &Project) -> Self {
-        let mut states = PortStates::default();
+        let mut states = PortStates {
+            off: project
+                .devices()
+                .iter()
+                .filter(|d| d.power == netrace_doc::Power::Off)
+                .map(|d| d.id)
+                .collect(),
+            ..PortStates::default()
+        };
         for d in project.devices() {
             if !d.kind.has_cli() {
                 continue;
@@ -43,7 +53,8 @@ impl PortStates {
             let b = (link.b.device, link.b.port.clone());
             states.cabled.insert(a.clone());
             states.cabled.insert(b.clone());
-            if !states.disabled.contains(&a) && !states.disabled.contains(&b) {
+            let powered = !states.off.contains(&a.0) && !states.off.contains(&b.0);
+            if powered && !states.disabled.contains(&a) && !states.disabled.contains(&b) {
                 states.up.insert(a);
                 states.up.insert(b);
             }
@@ -233,7 +244,7 @@ impl Stack {
                 }
                 stack
             }
-            DeviceKind::Router => {
+            k if k.is_router() => {
                 let mut stack = Stack::empty(StackKind::Router, ROUTER_TTL);
                 stack.forwarding = true;
                 for (index, port) in d.kind.port_names().into_iter().enumerate() {

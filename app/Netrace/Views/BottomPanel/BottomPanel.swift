@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Tabbed panel under the canvas: Console, Events, Capture.
 struct BottomPanel: View {
@@ -390,9 +391,11 @@ private struct CaptureTab: View {
                     Button("Stop", systemImage: "stop.fill") { workspace.captureLink = nil }
                         .controlSize(.small)
                     Button("Export .pcap", systemImage: "square.and.arrow.up") {
-                        workspace.flash("pcap export arrives after v1.")
+                        export(link: id, name: "\(a)-\(b)")
                     }
                     .controlSize(.small)
+                    .disabled(packets.isEmpty)
+                    .help("Save every frame on this cable as a pcap file for Wireshark")
                 }
                 .padding(.horizontal, Theme.Spacing.m)
                 .padding(.vertical, Theme.Spacing.xs + 2)
@@ -436,6 +439,23 @@ private struct CaptureTab: View {
                 .disabled(document.state.links.isEmpty)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+extension CaptureTab {
+    /// Saves the cable's frames as a pcap file, for Wireshark or tcpdump.
+    func export(link: UInt64, name: String) {
+        guard let data = simulation.pcap(link: link) else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(name).pcap"
+        panel.allowedContentTypes = [UTType(filenameExtension: "pcap") ?? .data]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try data.write(to: url)
+        } catch {
+            workspace.flash("Couldn't save the capture: \(error.localizedDescription)")
         }
     }
 }

@@ -23,6 +23,21 @@ struct LabBrowser: View {
             .padding(Theme.Spacing.l)
             PanelDivider(axis: .horizontal)
             List(selection: $selection) {
+                Section("Start here") {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(Theme.Palette.accent)
+                            .frame(width: 18, alignment: .trailing)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Tour of netrace").font(Theme.Font.label).foregroundStyle(Theme.Palette.textPrimary)
+                            Text("Two minutes around the app, on a network with every feature set up.")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Palette.textSecondary)
+                        }
+                    }
+                    .padding(.vertical, 3)
+                    .tag("tour")
+                }
                 ForEach(topics, id: \.self) { topic in
                     Section(topic) {
                         ForEach(labs.filter { $0.topic == topic }, id: \.id) { lab in
@@ -82,6 +97,11 @@ struct LabBrowser: View {
     }
 
     private func open(_ id: String) {
+        if id == "tour", let tour = ProjectDocument.tour() {
+            dismiss()
+            newDocument { tour }
+            return
+        }
         guard let json = bundledLabJson(id: id), let document = try? ProjectDocument(json: Data(json)) else {
             workspace.flash("That lab couldn't be opened.")
             return
